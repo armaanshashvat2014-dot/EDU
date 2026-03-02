@@ -1,4 +1,4 @@
-import streamlit as st
+ import streamlit as st
 import os
 import time
 import re
@@ -48,6 +48,17 @@ st.markdown("""
 .thinking-dot:nth-child(2){ animation-delay: 0.2s; }
 .thinking-dot:nth-child(3){ animation-delay: 0.4s; }
 @keyframes thinking-pulse { 0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); } 30% { opacity: 1; transform: scale(1.2); } }
+
+/* Fix Sidebar Button Heights */
+div[data-testid="stVerticalBlock"] div[data-testid="column"] button {
+    height: 42px !important;
+    min-height: 42px !important;
+    padding-top: 0px !important;
+    padding-bottom: 0px !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -343,7 +354,7 @@ with st.sidebar:
             st.caption("*Your saved chats will appear here.*")
 
         for t in sidebar_threads:
-            col1, col2 = st.columns([0.85, 0.15], vertical_alignment="center")
+            col1, col2 = st.columns([0.85, 0.15], gap="small", vertical_alignment="center")
 
             with col1:
                 icon = "🟢" if t["id"] == st.session_state.current_thread_id else "💬"
@@ -420,54 +431,26 @@ def clean_visual_tags_for_display(text: str) -> str:
     return cleaned.strip()
 
 # -----------------------------
-# 7) VISUAL GENERATORS
+# 7) VISUAL GENERATORS (FIXED)
 # -----------------------------
 def generate_single_image(desc: str):
     try:
         clean_desc = re.sub(r"\s+", " ", (desc or "")).strip()
 
-        # In the new SDK, you MUST declare the TEXT and IMAGE modalities and the aspect ratio
-        img_resp = client.models.generate_content(
-            model="gemini-3-pro-image-preview",
-            contents=[clean_desc],
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio="16:9"
-                )
+        # Use the dedicated generate_images endpoint which forces an image return
+        result = client.models.generate_images(
+            model='gemini-3-pro-image-preview',
+            prompt=clean_desc,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio="16:9"
             )
         )
-
-        # The new official way to extract the image according to Google's SDK docs
-        if hasattr(img_resp, "parts") and img_resp.parts:
-            # Filter for parts that have inline_data
-            image_parts = [part for part in img_resp.parts if getattr(part, "inline_data", None) is not None]
+        
+        # Extract the raw bytes flawlessly
+        for generated_image in result.generated_images:
+            return generated_image.image.image_bytes
             
-            if image_parts:
-                # Use the new .as_image() helper method and get the raw bytes
-                gen_image = image_parts[0].as_image()
-                if hasattr(gen_image, "image_bytes"):
-                    return gen_image.image_bytes
-                    
-        # Ultimate Fallback for nested candidate structures
-        if hasattr(img_resp, "candidates") and img_resp.candidates:
-            for cand in img_resp.candidates:
-                if hasattr(cand, "content") and hasattr(cand.content, "parts"):
-                    for part in cand.content.parts:
-                        if getattr(part, "inline_data", None) is not None:
-                            # Try the helper first
-                            if hasattr(part, "as_image"):
-                                gen_image = part.as_image()
-                                if hasattr(gen_image, "image_bytes"):
-                                    return gen_image.image_bytes
-                            # Direct byte fallback
-                            data = part.inline_data.data
-                            if isinstance(data, (bytes, bytearray)):
-                                return bytes(data)
-                            elif isinstance(data, str):
-                                import base64
-                                return base64.b64decode(data)
-
     except Exception as e:
         print(f"Image gen error: {e}")
     return None
@@ -513,7 +496,6 @@ def process_visual(prompt_data):
     if trigger_type == "PIE_CHART":
         return generate_pie_chart(data)
     return None
-
 
 # -----------------------------
 # 8) PDF EXPORT
@@ -966,7 +948,6 @@ if chat_input_data:
 
             thinking_placeholder.empty()
 
-            # FIX 1: DOTALL so multi-line prompts inside [...] still match
             visual_prompts = re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", bot_text, flags=re.DOTALL)
             generated_images = []
 
