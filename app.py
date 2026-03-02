@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import time
 import re
+import uuid
 import concurrent.futures
 from pathlib import Path
 from io import BytesIO
@@ -52,7 +53,6 @@ st.markdown("""
 # -----------------------------
 # 2) GUEST MODE & NATIVE GOOGLE LOGIN
 # -----------------------------
-# Safely get authentication object based on Streamlit version
 if hasattr(st, "user"):
     auth_object = st.user
 elif hasattr(st, "experimental_user"):
@@ -74,66 +74,162 @@ def get_firestore_client():
 
 db = get_firestore_client()
 
-# Firebase Helper Functions
-def get_user_doc_ref():
+# Firebase Threading Helper Functions
+def get_threads_collection():
     if is_authenticated and hasattr(auth_object, "email") and db is not None:
-        return db.collection("chats").document(auth_object.email)
+        return db.collection("users").document(auth_object.email).collection("threads")
     return None
 
-def load_chat_history():
-    doc_ref = get_user_doc_ref()
-    if doc_ref:
+def get_all_threads():
+    coll_ref = get_threads_collection()
+    if coll_ref:
         try:
-            doc = doc_ref.get()
-            if doc.exists:
-                return doc.to_dict().get("messages", [])
-        except Exception as e:
-            st.toast(f"⚠️ Failed to load chat history: {e}")
-            
-    # Default greeting if no database record exists or user is logged out (Guest Mode)
+            docs = coll_ref.order_by("updated_at", direction=firestore.Query.DESCENDING).limit(15).stream()
+            threads = []
+            for doc in docs:
+                data = doc.to_dict()
+                threads.append({"id": doc.id, "title": data.get("title", "New Chat"), "updated_at": data.get("updated_at", 0)})
+            return threads
+        except Exception:
+            pass
+    return []
+
+def get_default_greeting():
     return [{
         "role": "assistant",
         "content": "👋 **Hey there! I'm Helix!**\n\nI'm your friendly CIE tutor here to help you ace your CIE exams! 📖\n\nI can answer your doubts, draw diagrams, and create quizzes!\nYou can also **attach photos, PDFs, or text files directly in the chat box below!** 📸📄\n\n**Quick Reminder:** In the Cambridge system, your **Stage** is usually your **Grade + 1**.\n*(Example: If you are in Grade 7, you are studying Stage 8 content!)*\n\nWhat are we learning today?",
         "is_greeting": True,
     }]
 
-def save_chat_history():
-    doc_ref = get_user_doc_ref()
-    # ONLY save if they are logged in. Guests do not get saved!
-    if doc_ref:
+def load_chat_history(thread_id):
+    coll_ref = get_threads_collection()
+    if coll_ref and thread_id:
         try:
-            safe_messages = []
-            for msg in st.session_state.messages:
-                # Ensure strict typing so Firestore doesn't silently crash
-                safe_messages.append({
-                    "role": str(msg.get("role", "assistant")), 
-                    "content": str(msg.get("content", "")),
-                    "is_greeting": bool(msg.get("is_greeting", False))
-                })
-            # merge=True forces the overwrite to succeed
-            doc_ref.set({"messages": safe_messages}, merge=True)
-        except Exception as e:
-            st.toast(f"⚠️ Database Error: Could not save chat - {e}")
+            doc = coll_ref.document(thread_id).get()
+            if doc.exists:
+                return doc.to_dict().get("messages", [])
+        except Exception:
+            pass
+    return get_default_greeting()
 
-# Sidebar Login UI (FIXED)
+def save_chat_history():
+    coll_ref = get_threads_collection()
+    if not coll_ref: return # Skip if Guest Mode
+
+    current_id = st.session_state.current_thread_id
+    threads = get_all_threads()
+    thread_ids = [t["id"] for t in threads]
+    
+    is_new_thread = current_id not in thread_ids
+
+    # Extract first user message to use as the Thread Title
+    first_user_msg = "New Chat"
+    safe_messages = []
+    for msg in st.session_state.messages:
+        content_str = str(msg.get("content", ""))
+        if msg.get("role") == "user" and first_user_msg == "New Chat":
+            first_user_msg = content_str[:25] + "..." if len(content_str) > 25 else content_str
+            
+        safe_messages.append({
+            "role": str(msg.get("role", "assistant")), 
+            "content": content_str,
+            "is_greeting": bool(msg.get("is_greeting", False))
+        })
+
+    data = {
+        "messages": safe_messages,
+        "updated_at": time.time() # This helps sort the sidebar by most recent
+    }
+
+    if is_new_thread:
+        data["title"] = first_user_msg
+
+    try:
+        coll_ref.document(current_id).set(data, merge=True)
+    except Exception as e:
+        st.toast(f"⚠️ Database Error: Could not save chat - {e}")
+
+# -----------------------------
+# 3) INITIALIZE SESSION STATE
+# -----------------------------
+if "current_thread_id" not in st.session_state:
+    st.session_state.current_thread_id = str(uuid.uuid4())
+
+if "messages" not in st.session_state:
+    st.session_state.messages = get_default_greeting()
+
+# -----------------------------
+# 3.5) POPUP CONFIRMATION UI
+# -----------------------------
+@st.dialog("⚠️ Maximum Chats Reached")
+def confirm_new_chat_dialog(oldest_thread_id):
+    st.write("You have hit the maximum limit of **15 saved chats**.")
+    st.write("If you create a new chat, your oldest chat will be permanently deleted.")
+    st.write("Are you sure you want to do this?")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun() # Closes modal
+    with col2:
+        if st.button("Yes, Create New", type="primary", use_container_width=True):
+            coll_ref = get_threads_collection()
+            if coll_ref:
+                try:
+                    coll_ref.document(oldest_thread_id).delete()
+                except:
+                    pass
+            st.session_state.current_thread_id = str(uuid.uuid4())
+            st.session_state.messages = get_default_greeting()
+            st.rerun()
+
+# -----------------------------
+# 4) SIDEBAR UI (MULTIPLE CHATS)
+# -----------------------------
 with st.sidebar:
     st.title("Account Settings")
     if not is_authenticated:
         st.markdown("👋 **You are chatting as a Guest!**\n\n*Log in with Google to save your chat history permanently!*")
-        st.login(provider="google")
+        # Wrapped in a button so it doesn't auto-redirect on startup!
+        if st.button("Log in with Google", type="primary", use_container_width=True):
+            st.login(provider="google")
     else:
         user_name = auth_object.get("name", "Student") if hasattr(auth_object, "get") else "Student"
         st.success(f"Welcome back, **{user_name}**! 📚")
-        st.markdown("*Your chat history is being safely backed up!*")
         if st.button("Log out"):
             st.logout()
+            
+    st.divider()
+    
+    sidebar_threads = get_all_threads() if is_authenticated else []
+    
+    if st.button("➕ New Chat", use_container_width=True):
+        if is_authenticated and len(sidebar_threads) >= 15:
+            oldest_id = sidebar_threads[-1]["id"]
+            confirm_new_chat_dialog(oldest_id)
+        else:
+            st.session_state.current_thread_id = str(uuid.uuid4())
+            st.session_state.messages = get_default_greeting()
+            st.rerun()
+        
+    if is_authenticated:
+        st.subheader("Recent Chats")
+        if not sidebar_threads:
+            st.caption("*Your saved chats will appear here.*")
+            
+        for t in sidebar_threads:
+            icon = "🟢" if t["id"] == st.session_state.current_thread_id else "💬"
+            if st.button(f"{icon} {t['title']}", key=f"btn_{t['id']}", use_container_width=True):
+                st.session_state.current_thread_id = t["id"]
+                st.session_state.messages = load_chat_history(t["id"])
+                st.rerun()
 
-# Main app title (Friendly for everyone!)
+# Main app title
 st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Your CIE Tutor for Grade 6-8!</div>", unsafe_allow_html=True)
 
 # -----------------------------
-# 3) INITIALIZE GEMINI
+# 5) INITIALIZE GEMINI
 # -----------------------------
 api_key = os.environ.get("GOOGLE_API_KEY")
 if not api_key:
@@ -150,7 +246,7 @@ except Exception as e:
     st.stop()
 
 # -----------------------------
-# 4) HELPERS & LATEX CLEANER
+# 6) HELPERS & LATEX CLEANER
 # -----------------------------
 def get_friendly_name(filename: str) -> str:
     if not filename: return "Cambridge Textbook"
@@ -194,7 +290,7 @@ def md_inline_to_rl(text: str) -> str:
     return s
 
 # -----------------------------
-# 5) VISUAL GENERATORS
+# 7) VISUAL GENERATORS
 # -----------------------------
 def generate_single_image(desc: str):
     try:
@@ -241,7 +337,7 @@ def process_visual(prompt_data):
     return None
 
 # -----------------------------
-# 6) PDF EXPORT 
+# 8) PDF EXPORT 
 # -----------------------------
 def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
     buffer = BytesIO()
@@ -351,7 +447,7 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
     return buffer
 
 # -----------------------------
-# 7) SYSTEM INSTRUCTION
+# 9) SYSTEM INSTRUCTION
 # -----------------------------
 SYSTEM_INSTRUCTION = """
 You are Helix, a friendly CIE Science/Math/English Tutor for Stage 7-9 students.
@@ -457,7 +553,7 @@ Chapter 7 • Testing your skills
 """
 
 # -----------------------------
-# 8) GOOGLE FILE API
+# 10) GOOGLE FILE API
 # -----------------------------
 @st.cache_resource(show_spinner=False)
 def upload_textbooks():
@@ -514,18 +610,16 @@ def upload_textbooks():
     return active_files
 
 # -----------------------------
-# 9) SMART RAG ROUTING
+# 11) SMART RAG ROUTING
 # -----------------------------
 def select_relevant_books(query, file_dict):
     q = (query or "").lower()
     selected = []
 
-    # Check for subject keywords
     is_math = any(k in q for k in ["math", "algebra", "geometry", "calculate", "equation", "number", "fraction"])
     is_sci = any(k in q for k in ["science", "cell", "biology", "physics", "chemistry", "experiment", "gravity"])
     is_eng = any(k in q for k in ["english", "poem", "story", "essay", "writing", "grammar", "noun", "verb"])
     
-    # Check for stage/grade keywords
     stage_7 = any(k in q for k in ["stage 7", "grade 6", "year 7"])
     stage_8 = any(k in q for k in ["stage 8", "grade 7", "year 8"])
     stage_9 = any(k in q for k in ["stage 9", "grade 8", "year 9"])
@@ -533,17 +627,10 @@ def select_relevant_books(query, file_dict):
     has_subject = is_math or is_sci or is_eng
     has_stage = stage_7 or stage_8 or stage_9
 
-    # SMART BYPASS: If they don't mention ANY subject or stage, don't waste time scanning books!
-    if not has_subject and not has_stage:
-        return [] # Returns an empty list so it skips RAG entirely
+    if not has_subject and not has_stage: return [] 
 
-    # If they mentioned a stage but no subject, let's default to searching all subjects for that stage
-    if has_stage and not has_subject:
-        is_math = is_sci = is_eng = True
-        
-    # If they mentioned a subject but no stage, let's default to Stage 8
-    if has_subject and not has_stage:
-        stage_8 = True
+    if has_stage and not has_subject: is_math = is_sci = is_eng = True
+    if has_subject and not has_stage: stage_8 = True
 
     def add_books(subject_key, active):
         if not active: return
@@ -559,11 +646,8 @@ def select_relevant_books(query, file_dict):
     return selected[:3]
 
 # -----------------------------
-# 10) SESSION INIT & CHAT
+# 12) RENDER CHAT
 # -----------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = load_chat_history()
-
 if "textbook_handles" not in st.session_state:
     st.session_state.textbook_handles = upload_textbooks()
 
@@ -591,12 +675,12 @@ for idx, message in enumerate(st.session_state.messages):
                     data=pdf_buffer,
                     file_name=f"Helix_Question_Paper_{idx}.pdf",
                     mime="application/pdf",
-                    key=f"download_{idx}",
+                    key=f"download_{st.session_state.current_thread_id}_{idx}",
                 )
             except Exception: pass
 
 # -----------------------------
-# 11) MAIN LOOP
+# 13) MAIN LOOP
 # -----------------------------
 chat_input_data = st.chat_input("Ask Helix... (Click the paperclip to upload a file!)", accept_file=True, file_type=["jpg", "jpeg", "png", "webp", "avif", "svg", "pdf", "txt"])
 
@@ -616,7 +700,7 @@ if chat_input_data:
         user_msg["user_attachment_name"] = file_name
 
     st.session_state.messages.append(user_msg)
-    save_chat_history() # Save user message to Firebase
+    save_chat_history()
 
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -628,13 +712,8 @@ if chat_input_data:
     with st.chat_message("assistant"):
         thinking_placeholder = st.empty()
         try:
-            # Check if there's an active file attachment - if so, ALWAYS trigger RAG!
             has_attachment = file_bytes is not None
-            
-            # If there's an attachment, force Gemini to look at the books too just in case.
-            # Otherwise, use the smart bypass logic.
             if has_attachment:
-                 # If they attached a file but didn't mention a subject, let's just grab Stage 8 Science as a default helper
                  relevant_books = select_relevant_books(prompt + " science stage 8", st.session_state.textbook_handles)
             else:
                  relevant_books = select_relevant_books(prompt, st.session_state.textbook_handles)
@@ -646,7 +725,6 @@ if chat_input_data:
                 if has_attachment:
                      st.caption("🔍 *Analyzing attached file...*")
                 else:
-                     # General conversation!
                      st.caption("⚡ *Quick reply (General Knowledge)*")
 
             thinking_placeholder.markdown("""
@@ -725,26 +803,9 @@ if chat_input_data:
             bot_msg = {"role": "assistant", "content": bot_text, "is_downloadable": is_downloadable, "images": generated_images}
             
             st.session_state.messages.append(bot_msg)
-            save_chat_history() # Save bot message to Firebase
-
-            display_text = bot_text.replace("[PDF_READY]", "").strip()
-            st.markdown(display_text)
-
-            for img in generated_images:
-                if img: st.image(img, caption="Generated Visual")
-
-            if is_downloadable:
-                try:
-                    pdf_buffer = create_pdf(bot_text, images=generated_images)
-                    st.download_button(
-                        label="📥 Download Question Paper as PDF",
-                        data=pdf_buffer,
-                        file_name=f"Helix_Question_Paper_{len(st.session_state.messages)}.pdf",
-                        mime="application/pdf",
-                        key="download_current",
-                    )
-                except Exception as pdf_err:
-                    st.error(f"Could not generate PDF: {pdf_err}")
+            save_chat_history()
+            
+            st.rerun()
 
         except Exception as e:
             thinking_placeholder.empty()
