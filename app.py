@@ -434,38 +434,6 @@ def _maybe_b64_to_bytes(x):
             return None
     return None
 
-def _extract_inline_image_bytes(gen_resp):
-    found = []
-
-    # Path A: resp.parts
-    try:
-        parts = getattr(gen_resp, "parts", None) or []
-        for part in parts:
-            inline = getattr(part, "inline_data", None)
-            if inline and getattr(inline, "data", None) is not None:
-                b = _maybe_b64_to_bytes(inline.data)
-                if b:
-                    found.append(b)
-    except Exception:
-        pass
-
-    # Path B: resp.candidates[0].content.parts
-    try:
-        cands = getattr(gen_resp, "candidates", None) or []
-        for cand in cands:
-            content = getattr(cand, "content", None)
-            parts = getattr(content, "parts", None) or []
-            for part in parts:
-                inline = getattr(part, "inline_data", None)
-                if inline and getattr(inline, "data", None) is not None:
-                    b = _maybe_b64_to_bytes(inline.data)
-                    if b:
-                        found.append(b)
-    except Exception:
-        pass
-
-    return found
-
 def generate_single_image(desc: str):
     try:
         clean_desc = re.sub(r"\s+", " ", (desc or "")).strip()
@@ -473,13 +441,23 @@ def generate_single_image(desc: str):
         img_resp = client.models.generate_content(
             model="gemini-3-pro-image-preview",
             contents=[clean_desc],
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-            ),
+            # Do NOT use response_modalities config here, the new SDK prefers it without for this model
         )
 
-        imgs = _extract_inline_image_bytes(img_resp)
-        return imgs[0] if imgs else None
+        # The new Google GenAI SDK stores generated image parts directly in resp.parts
+        if hasattr(img_resp, "parts") and img_resp.parts:
+            for part in img_resp.parts:
+                if hasattr(part, "inline_data") and part.inline_data:
+                    return _maybe_b64_to_bytes(part.inline_data.data)
+                    
+        # Fallback to checking candidates
+        if hasattr(img_resp, "candidates") and img_resp.candidates:
+            for cand in img_resp.candidates:
+                if hasattr(cand, "content") and hasattr(cand.content, "parts"):
+                    for part in cand.content.parts:
+                        if hasattr(part, "inline_data") and part.inline_data:
+                            return _maybe_b64_to_bytes(part.inline_data.data)
+
     except Exception as e:
         print(f"Image gen error: {e}")
     return None
@@ -525,6 +503,7 @@ def process_visual(prompt_data):
     if trigger_type == "PIE_CHART":
         return generate_pie_chart(data)
     return None
+
 
 # -----------------------------
 # 8) PDF EXPORT
