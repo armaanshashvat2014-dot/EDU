@@ -115,17 +115,18 @@ def save_chat_history():
         except Exception as e:
             st.toast(f"⚠️ Database Error: Could not save chat - {e}")
 
-# Sidebar Login UI
-st.sidebar.title("Account Settings")
-if not is_authenticated:
-    st.sidebar.markdown("👋 **You are chatting as a Guest!**\n\n*Log in with Google to save your chat history permanently!*")
-    st.sidebar.login(provider="google")
-else:
-    user_name = auth_object.get("name", "Student") if hasattr(auth_object, "get") else "Student"
-    st.sidebar.success(f"Welcome back, **{user_name}**! 📚")
-    st.sidebar.markdown("*Your chat history is being safely backed up!*")
-    if st.sidebar.button("Log out"):
-        st.logout()
+# Sidebar Login UI (FIXED)
+with st.sidebar:
+    st.title("Account Settings")
+    if not is_authenticated:
+        st.markdown("👋 **You are chatting as a Guest!**\n\n*Log in with Google to save your chat history permanently!*")
+        st.login(provider="google")
+    else:
+        user_name = auth_object.get("name", "Student") if hasattr(auth_object, "get") else "Student"
+        st.success(f"Welcome back, **{user_name}**! 📚")
+        st.markdown("*Your chat history is being safely backed up!*")
+        if st.button("Log out"):
+            st.logout()
 
 # Main app title (Friendly for everyone!)
 st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
@@ -513,32 +514,44 @@ def upload_textbooks():
     return active_files
 
 # -----------------------------
-# 9) ROUTING
+# 9) SMART RAG ROUTING
 # -----------------------------
 def select_relevant_books(query, file_dict):
     q = (query or "").lower()
     selected = []
 
-    is_math = any(k in q for k in ["math", "algebra", "geometry", "calculate", "equation"])
-    is_sci = any(k in q for k in ["science", "cell", "biology", "physics", "chemistry"])
-    is_eng = any(k in q for k in ["english", "poem", "story", "essay", "writing"])
-    if not is_math and not is_sci and not is_eng: is_sci = True
-
-    stage_7 = any(k in q for k in ["stage 7", "grade 6"])
-    stage_8 = any(k in q for k in ["stage 8", "grade 7"])
-    stage_9 = any(k in q for k in ["stage 9", "grade 8"])
+    # Check for subject keywords
+    is_math = any(k in q for k in ["math", "algebra", "geometry", "calculate", "equation", "number", "fraction"])
+    is_sci = any(k in q for k in ["science", "cell", "biology", "physics", "chemistry", "experiment", "gravity"])
+    is_eng = any(k in q for k in ["english", "poem", "story", "essay", "writing", "grammar", "noun", "verb"])
+    
+    # Check for stage/grade keywords
+    stage_7 = any(k in q for k in ["stage 7", "grade 6", "year 7"])
+    stage_8 = any(k in q for k in ["stage 8", "grade 7", "year 8"])
+    stage_9 = any(k in q for k in ["stage 9", "grade 8", "year 9"])
+    
+    has_subject = is_math or is_sci or is_eng
     has_stage = stage_7 or stage_8 or stage_9
+
+    # SMART BYPASS: If they don't mention ANY subject or stage, don't waste time scanning books!
+    if not has_subject and not has_stage:
+        return [] # Returns an empty list so it skips RAG entirely
+
+    # If they mentioned a stage but no subject, let's default to searching all subjects for that stage
+    if has_stage and not has_subject:
+        is_math = is_sci = is_eng = True
+        
+    # If they mentioned a subject but no stage, let's default to Stage 8
+    if has_subject and not has_stage:
+        stage_8 = True
 
     def add_books(subject_key, active):
         if not active: return
         for book in file_dict.get(subject_key, []):
             name = (book.display_name or "").lower()
-            if has_stage:
-                if stage_7 and "cie_7" in name: selected.append(book)
-                if stage_8 and "cie_8" in name: selected.append(book)
-                if stage_9 and "cie_9" in name: selected.append(book)
-            else:
-                if "cie_8" in name: selected.append(book)
+            if stage_7 and "cie_7" in name: selected.append(book)
+            if stage_8 and "cie_8" in name: selected.append(book)
+            if stage_9 and "cie_9" in name: selected.append(book)
 
     add_books("math", is_math)
     add_books("sci", is_sci)
@@ -615,12 +628,26 @@ if chat_input_data:
     with st.chat_message("assistant"):
         thinking_placeholder = st.empty()
         try:
-            relevant_books = select_relevant_books(prompt, st.session_state.textbook_handles)
+            # Check if there's an active file attachment - if so, ALWAYS trigger RAG!
+            has_attachment = file_bytes is not None
+            
+            # If there's an attachment, force Gemini to look at the books too just in case.
+            # Otherwise, use the smart bypass logic.
+            if has_attachment:
+                 # If they attached a file but didn't mention a subject, let's just grab Stage 8 Science as a default helper
+                 relevant_books = select_relevant_books(prompt + " science stage 8", st.session_state.textbook_handles)
+            else:
+                 relevant_books = select_relevant_books(prompt, st.session_state.textbook_handles)
+
             if relevant_books:
                 book_names = [get_friendly_name(b.display_name) for b in relevant_books]
                 st.caption(f"🔍 *Scanning Curriculum: {', '.join(book_names)}*")
             else:
-                st.caption("🔍 *Scanning generalized database.*")
+                if has_attachment:
+                     st.caption("🔍 *Analyzing attached file...*")
+                else:
+                     # General conversation!
+                     st.caption("⚡ *Quick reply (General Knowledge)*")
 
             thinking_placeholder.markdown("""
                 <div class="thinking-container">
@@ -652,7 +679,7 @@ if chat_input_data:
                 current_prompt_parts.append(types.Part.from_text(text=f"[Source Document: {friendly}]"))
                 current_prompt_parts.append(types.Part.from_uri(file_uri=book.uri, mime_type="application/pdf"))
 
-            current_prompt_parts.append(types.Part.from_text(text=f"Please read the user query and look at attached files. Check Cambridge textbooks for accuracy.\n\nQuery: {prompt}"))
+            current_prompt_parts.append(types.Part.from_text(text=f"Please read the user query and look at attached files. Check Cambridge textbooks for accuracy if provided.\n\nQuery: {prompt}"))
             current_content = types.Content(role="user", parts=current_prompt_parts)
 
             history_contents = []
@@ -728,4 +755,3 @@ if chat_input_data:
                 if "temp_pdf_path" in locals() and temp_pdf_path and os.path.exists(temp_pdf_path):
                     os.remove(temp_pdf_path)
             except Exception: pass
-
