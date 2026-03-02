@@ -47,14 +47,6 @@ st.markdown("""
 .thinking-dot:nth-child(2){ animation-delay: 0.2s; }
 .thinking-dot:nth-child(3){ animation-delay: 0.4s; }
 @keyframes thinking-pulse { 0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); } 30% { opacity: 1; transform: scale(1.2); } }
-
-/* 🚨 POPOVER FIXES 🚨 */
-/* 1. Hide the downward chevron arrow on the popover button */
-div[data-testid="stPopover"] button svg { display: none !important; }
-/* 2. Shrink the padding and make the button perfectly square/centered */
-div[data-testid="stPopover"] button { padding: 0.2rem 0rem !important; min-height: 2.5rem !important; }
-/* 3. Make the actual dropdown menu smaller and tighter */
-div[data-testid="stPopoverBody"] { padding: 1rem !important; min-width: 200px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -208,7 +200,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = get_default_greeting()
 
 # -----------------------------
-# 3.5) POPUP CONFIRMATION UI
+# 3.5) DIALOG UI MENUS
 # -----------------------------
 @st.dialog("⚠️ Maximum Chats Reached")
 def confirm_new_chat_dialog(oldest_thread_id):
@@ -249,11 +241,40 @@ def confirm_delete_chat_dialog(thread_id_to_delete):
                     coll_ref.document(thread_id_to_delete).delete()
                 except: pass
             
-            # If we deleted the chat we are currently looking at, start fresh
             if st.session_state.current_thread_id == thread_id_to_delete:
                 st.session_state.current_thread_id = str(uuid.uuid4())
                 st.session_state.messages = get_default_greeting()
             st.rerun()
+
+@st.dialog("⚙️ Chat Settings")
+def chat_settings_dialog(t):
+    # Metadata Display
+    st.markdown("**Chat Metadata**")
+    subs = ", ".join(t.get("metadata", {}).get("subjects", [])) or "None"
+    grds = ", ".join(t.get("metadata", {}).get("grades", [])) or "None"
+    st.caption(f"📚 **Subjects:** {subs}")
+    st.caption(f"🎓 **Grades:** {grds}")
+    
+    st.divider()
+    
+    # Rename Input
+    new_title = st.text_input("Rename Chat", value=t["title"], key=f"ren_in_{t['id']}")
+    if st.button("💾 Save Name", key=f"ren_btn_{t['id']}", use_container_width=True):
+        coll_ref = get_threads_collection()
+        if coll_ref:
+            coll_ref.document(t["id"]).set({
+                "title": new_title,
+                "user_edited_title": True
+            }, merge=True)
+        st.rerun()
+        
+    st.divider()
+    
+    # Trigger Delete Dialog
+    if st.button("🗑️ Delete Chat", key=f"del_btn_settings_{t['id']}", type="primary", use_container_width=True):
+        st.rerun() # Closes this dialog so the delete dialog can open
+        st.session_state[f"trigger_delete_{t['id']}"] = True
+
 
 # -----------------------------
 # 4) SIDEBAR UI (MULTIPLE CHATS)
@@ -289,7 +310,8 @@ with st.sidebar:
             st.caption("*Your saved chats will appear here.*")
             
         for t in sidebar_threads:
-            col1, col2 = st.columns([0.88, 0.12], vertical_alignment="center")
+            # We use an empty label and the native icon parameter to get a pure 3-dots button!
+            col1, col2 = st.columns([0.85, 0.15], vertical_alignment="center")
             
             with col1:
                 icon = "🟢" if t["id"] == st.session_state.current_thread_id else "💬"
@@ -299,30 +321,14 @@ with st.sidebar:
                     st.rerun()
                     
             with col2:
-                with st.popover("⋮", use_container_width=True):
-                    st.markdown("**Chat Metadata**")
-                    subs = ", ".join(t.get("metadata", {}).get("subjects", [])) or "None"
-                    grds = ", ".join(t.get("metadata", {}).get("grades", [])) or "None"
-                    st.caption(f"📚 **Subjects:** {subs}")
-                    st.caption(f"🎓 **Grades:** {grds}")
-                    
-                    st.divider()
-                    
-                    new_title = st.text_input("Rename Chat", value=t["title"], key=f"ren_in_{t['id']}")
-                    if st.button("Save Name", key=f"ren_btn_{t['id']}", use_container_width=True):
-                        coll_ref = get_threads_collection()
-                        if coll_ref:
-                            # User edits the title, flip the safety flag so AI ignores it
-                            coll_ref.document(t["id"]).set({
-                                "title": new_title,
-                                "user_edited_title": True
-                            }, merge=True)
-                        st.rerun()
-                        
-                    st.divider()
-                    
-                    if st.button("🗑️ Delete Chat", key=f"del_btn_{t['id']}", use_container_width=True):
-                        confirm_delete_chat_dialog(t["id"])
+                # This opens the settings dialog instead of a popover
+                if st.button("", icon=":material/more_vert:", key=f"settings_{t['id']}", use_container_width=True):
+                    chat_settings_dialog(t)
+            
+            # Check if the settings dialog requested a delete
+            if st.session_state.get(f"trigger_delete_{t['id']}", False):
+                st.session_state[f"trigger_delete_{t['id']}"] = False
+                confirm_delete_chat_dialog(t["id"])
 
 # Main app title
 st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
