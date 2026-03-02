@@ -257,7 +257,7 @@ def chat_settings_dialog(thread_data):
     subs = ", ".join(thread_data.get("metadata", {}).get("subjects", [])) or "None"
     grds = ", ".join(thread_data.get("metadata", {}).get("grades", [])) or "None"
     st.caption(f"📚 **Subjects:** {subs}")
-    st.caption(f"🎓 **Grades:** {grds}")
+    st.caption(f"🎓 **Stages:** {grds}")
     
     st.divider()
     
@@ -789,7 +789,7 @@ for idx, message in enumerate(st.session_state.messages):
 # -----------------------------
 # 13) MAIN LOOP
 # -----------------------------
-chat_input_data = st.chat_input("Ask Helix... (Click the paperclip to upload a file!)", accept_file=True, file_type=["jpg", "jpeg", "png", "webp", "avif", "svg", "pdf", "txt"])
+chat_input_data = st.chat_input("Ask Helix for diagrams, quizes and more... (Click the plus to upload a file!)", accept_file=True, file_type=["jpg", "jpeg", "png", "webp", "avif", "svg", "pdf", "txt"])
 
 if chat_input_data:
     prompt = chat_input_data.text or ""
