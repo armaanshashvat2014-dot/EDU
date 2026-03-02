@@ -49,7 +49,10 @@ st.markdown("""
 # -----------------------------
 # 2) NATIVE GOOGLE LOGIN
 # -----------------------------
-if not st.experimental_user.is_logged_in:
+# Safely check if the user is logged in without throwing an AttributeError
+is_authenticated = getattr(st.experimental_user, "is_logged_in", False)
+
+if not is_authenticated:
     st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
     st.markdown("<div class='subtitle'>Please log in with Google to continue.</div>", unsafe_allow_html=True)
     
@@ -60,7 +63,9 @@ if not st.experimental_user.is_logged_in:
     st.stop() # Stops the rest of the app from running until logged in
 
 # If logged in, show user info and logout button in sidebar
-st.sidebar.write(f"Welcome back, **{st.experimental_user.name}**! 📚")
+user_name = st.experimental_user.get("name", "Student")
+st.sidebar.write(f"Welcome back, **{user_name}**! 📚")
+
 if st.sidebar.button("Log out"):
     st.logout()
 
