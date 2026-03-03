@@ -52,6 +52,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Fetch teacher code from secrets
+TEACHER_VERIFICATION_CODE = st.secrets.get("TEACHER_VERIFICATION_CODE", "7nI9sL0")
+
 # -----------------------------
 # 1.5) STAGE NORMALIZATION HELPER
 # -----------------------------
@@ -89,6 +92,24 @@ def get_firestore_client():
     return None
 
 db = get_firestore_client()
+
+# Fetch User Profile & Role
+def get_user_profile(email):
+    if not db: return {"role": "student"}
+    doc_ref = db.collection("users").document(email)
+    doc = doc_ref.get()
+    if doc.exists:
+        return doc.to_dict()
+    else:
+        default_profile = {"role": "student", "teacher_id": None}
+        doc_ref.set(default_profile)
+        return default_profile
+
+user_role = "guest"
+if is_authenticated:
+    user_email = auth_object.email
+    user_profile = get_user_profile(user_email)
+    user_role = user_profile.get("role", "student")
 
 # Firebase Threading Helper Functions
 def get_threads_collection():
@@ -135,24 +156,16 @@ def load_chat_history(thread_id):
     return get_default_greeting()
 
 def compress_image_for_db(image_bytes: bytes) -> str:
-    """Compress high-res image bytes into a lightweight base64 string for Firestore 1MB limits."""
     try:
         if not image_bytes:
             return None
         img = Image.open(BytesIO(image_bytes))
-        
-        # Convert to RGB to ensure JPEG compatibility
         if img.mode != 'RGB':
             img = img.convert('RGB')
-            
-        # Downscale 2K to 720p maximum for chat history viewing
         max_size = (1280, 720)
         img.thumbnail(max_size, Image.Resampling.LANCZOS)
-        
-        # Compress into a small JPEG buffer
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=60, optimize=True)
-        
         return base64.b64encode(buf.getvalue()).decode('utf-8')
     except Exception as e:
         print(f"Image compression error: {e}")
@@ -161,11 +174,10 @@ def compress_image_for_db(image_bytes: bytes) -> str:
 def save_chat_history():
     coll_ref = get_threads_collection()
     if not coll_ref:
-        return  # Skip if Guest Mode
+        return 
 
     current_id = st.session_state.current_thread_id
     safe_messages = []
-
     detected_subjects = set()
     detected_grades = set()
 
@@ -182,7 +194,6 @@ def save_chat_history():
             if any(k in q for k in ["english", "poem", "story", "essay", "writing", "grammar", "noun", "verb"]):
                 detected_subjects.add("English")
             
-            # Use normalized text to catch "stage seven" instead of just "stage 7"
             qn = normalize_stage_text(content_str)
             if bool(re.search(r"\bstage\W*7\b", qn) or re.search(r"\bgrade\W*6\b", qn) or re.search(r"\byear\W*7\b", qn)):
                 detected_grades.add("Stage 7")
@@ -191,7 +202,6 @@ def save_chat_history():
             if bool(re.search(r"\bstage\W*9\b", qn) or re.search(r"\bgrade\W*8\b", qn) or re.search(r"\byear\W*9\b", qn)):
                 detected_grades.add("Stage 9")
 
-        # Compress generated images to keep Firebase doc under 1MB
         db_images = []
         if msg.get("images"):
             for img_bytes in msg["images"]:
@@ -199,8 +209,6 @@ def save_chat_history():
                     compressed_b64 = compress_image_for_db(img_bytes)
                     if compressed_b64:
                         db_images.append(compressed_b64)
-                        
-        # Also copy over existing db_images if we are just re-saving an old loaded chat
         elif msg.get("db_images"):
             db_images = msg["db_images"]
 
@@ -232,27 +240,22 @@ def save_chat_history():
 def safe_response_text(resp) -> str:
     try:
         t = getattr(resp, "text", None)
-        if t:
-            return str(t)
-    except Exception:
-        pass
+        if t: return str(t)
+    except Exception: pass
     try:
         cands = getattr(resp, "candidates", None) or []
         if cands:
             content = getattr(cands[0], "content", None)
             parts = getattr(content, "parts", None) or []
             texts = [getattr(p, "text", None) for p in parts if getattr(p, "text", None)]
-            if texts:
-                return "\n".join(texts)
-    except Exception:
-        pass
+            if texts: return "\n".join(texts)
+    except Exception: pass
     return ""
 
 def generate_chat_title(client, messages):
     try:
         user_msgs = [m.get("content", "") for m in messages if m.get("role") == "user"]
-        if not user_msgs:
-            return "New Chat"
+        if not user_msgs: return "New Chat"
 
         context_text = "\n".join(user_msgs[-3:])
         prompt = (
@@ -261,14 +264,10 @@ def generate_chat_title(client, messages):
             f"{context_text}"
         )
 
-        # FIXED: Swapped to stable 'gemini-2.5-flash' to prevent missing model errors
         response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
+            model="gemini-2.5-flash",
             contents=[prompt],
-            config=types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=15
-            ),
+            config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=15),
         )
 
         title = safe_response_text(response).strip().replace('"', '').replace("'", "")
@@ -297,19 +296,15 @@ def confirm_new_chat_dialog(oldest_thread_id):
     st.write("You have hit the maximum limit of **15 saved chats**.")
     st.write("If you create a new chat, your oldest chat will be permanently deleted.")
     st.write("Are you sure you want to do this?")
-
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Cancel", use_container_width=True):
-            st.rerun()
+        if st.button("Cancel", use_container_width=True): st.rerun()
     with col2:
         if st.button("Yes, Create New", type="primary", use_container_width=True):
             coll_ref = get_threads_collection()
             if coll_ref:
-                try:
-                    coll_ref.document(oldest_thread_id).delete()
-                except Exception:
-                    pass
+                try: coll_ref.document(oldest_thread_id).delete()
+                except Exception: pass
             st.session_state.current_thread_id = str(uuid.uuid4())
             st.session_state.messages = get_default_greeting()
             st.rerun()
@@ -318,7 +313,6 @@ def confirm_new_chat_dialog(oldest_thread_id):
 def confirm_delete_chat_dialog(thread_id_to_delete):
     st.write("Are you sure you want to permanently delete this chat?")
     st.write("*This action cannot be undone.*")
-
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Cancel", use_container_width=True):
@@ -328,15 +322,11 @@ def confirm_delete_chat_dialog(thread_id_to_delete):
         if st.button("Yes, Delete", type="primary", use_container_width=True):
             coll_ref = get_threads_collection()
             if coll_ref:
-                try:
-                    coll_ref.document(thread_id_to_delete).delete()
-                except Exception:
-                    pass
-
+                try: coll_ref.document(thread_id_to_delete).delete()
+                except Exception: pass
             if st.session_state.current_thread_id == thread_id_to_delete:
                 st.session_state.current_thread_id = str(uuid.uuid4())
                 st.session_state.messages = get_default_greeting()
-
             st.session_state.delete_requested_for = None
             st.rerun()
 
@@ -347,76 +337,153 @@ def chat_settings_dialog(thread_data):
     grds = ", ".join(thread_data.get("metadata", {}).get("grades", [])) or "None"
     st.caption(f"📚 **Subjects:** {subs}")
     st.caption(f"🎓 **Grades:** {grds}")
-
     st.divider()
-
     new_title = st.text_input("Rename Chat", value=thread_data["title"], key=f"ren_in_{thread_data['id']}")
     if st.button("💾 Save Name", key=f"ren_btn_{thread_data['id']}", use_container_width=True):
         coll_ref = get_threads_collection()
         if coll_ref:
-            coll_ref.document(thread_data["id"]).set({
-                "title": new_title,
-                "user_edited_title": True
-            }, merge=True)
+            coll_ref.document(thread_data["id"]).set({"title": new_title, "user_edited_title": True}, merge=True)
         st.rerun()
-
     st.divider()
-
     if st.button("🗑️ Delete Chat", key=f"del_btn_set_{thread_data['id']}", type="primary", use_container_width=True):
         st.session_state.delete_requested_for = thread_data["id"]
         st.rerun()
 
 # -----------------------------
-# 4) SIDEBAR UI (MULTIPLE CHATS)
+# 4) SIDEBAR UI & ROLE MANAGEMENT
 # -----------------------------
 with st.sidebar:
     st.title("Account Settings")
     if not is_authenticated:
-        st.markdown("👋 **You are chatting as a Guest!**\n\n*Log in with Google to save your chat history permanently!*")
+        st.markdown("👋 **You are chatting as a Guest!**\n\n*Log in with Google to save history!*")
         if st.button("Log in with Google", type="primary", use_container_width=True):
             st.login(provider="google")
     else:
-        user_name = auth_object.get("name", "Student") if hasattr(auth_object, "get") else "Student"
-        st.success(f"Welcome back, **{user_name}**! 📚")
+        user_name = auth_object.get("name", "User")
+        st.success(f"Welcome back, **{user_name}**! ({user_role.capitalize()})")
         if st.button("Log out"):
             st.logout()
+            
+        st.divider()
 
-    st.divider()
+        # TEACHER VERIFICATION
+        if user_role == "student":
+            with st.expander("🎓 Are you a Teacher?"):
+                st.caption("Enter your school's verification code to unlock the Teacher Dashboard.")
+                code_input = st.text_input("Teacher Code", type="password")
+                if st.button("Verify Code"):
+                    if code_input == TEACHER_VERIFICATION_CODE:
+                        db.collection("users").document(user_email).update({"role": "teacher"})
+                        st.success("Verified! Refreshing app...")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Invalid Code.")
 
-    sidebar_threads = get_all_threads() if is_authenticated else []
+    # Show Chat History ONLY for Students
+    if user_role != "teacher":
+        sidebar_threads = get_all_threads() if is_authenticated else []
 
-    if st.button("➕ New Chat", use_container_width=True):
-        if is_authenticated and len(sidebar_threads) >= 15:
-            oldest_id = sidebar_threads[-1]["id"]
-            confirm_new_chat_dialog(oldest_id)
-        else:
-            st.session_state.current_thread_id = str(uuid.uuid4())
-            st.session_state.messages = get_default_greeting()
-            st.rerun()
+        if st.button("➕ New Chat", use_container_width=True):
+            if is_authenticated and len(sidebar_threads) >= 15:
+                oldest_id = sidebar_threads[-1]["id"]
+                confirm_new_chat_dialog(oldest_id)
+            else:
+                st.session_state.current_thread_id = str(uuid.uuid4())
+                st.session_state.messages = get_default_greeting()
+                st.rerun()
 
-    if is_authenticated:
-        st.subheader("Recent Chats")
-        if not sidebar_threads:
-            st.caption("*Your saved chats will appear here.*")
+        if is_authenticated:
+            st.subheader("Recent Chats")
+            if not sidebar_threads:
+                st.caption("*Your saved chats will appear here.*")
 
-        for t in sidebar_threads:
-            col1, col2 = st.columns([0.85, 0.15], vertical_alignment="center")
-
-            with col1:
-                icon = "🟢" if t["id"] == st.session_state.current_thread_id else "💬"
-                if st.button(f"{icon} {t['title']}", key=f"btn_{t['id']}", use_container_width=True):
-                    st.session_state.current_thread_id = t["id"]
-                    st.session_state.messages = load_chat_history(t["id"])
-                    st.rerun()
-
-            with col2:
-                if st.button("", icon=":material/more_vert:", key=f"set_btn_{t['id']}", use_container_width=True):
-                    chat_settings_dialog(t)
+            for t in sidebar_threads:
+                col1, col2 = st.columns([0.85, 0.15], vertical_alignment="center")
+                with col1:
+                    icon = "🟢" if t["id"] == st.session_state.current_thread_id else "💬"
+                    if st.button(f"{icon} {t['title']}", key=f"btn_{t['id']}", use_container_width=True):
+                        st.session_state.current_thread_id = t["id"]
+                        st.session_state.messages = load_chat_history(t["id"])
+                        st.rerun()
+                with col2:
+                    if st.button("", icon=":material/more_vert:", key=f"set_btn_{t['id']}", use_container_width=True):
+                        chat_settings_dialog(t)
 
 if st.session_state.delete_requested_for:
     confirm_delete_chat_dialog(st.session_state.delete_requested_for)
 
-# Main app title
+# ==========================================
+# APP ROUTING: TEACHER DASHBOARD
+# ==========================================
+if user_role == "teacher":
+    st.markdown("<div class='big-title' style='color:#fc8404;'>👨‍🏫 helix.ai / Teacher</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Classroom Analytics & Assignments</div>", unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["⚙️ Class Management", "📊 Student Analytics", "📝 Assign Papers"])
+    
+    # --- TAB 1: Add/Remove Students ---
+    with tab1:
+        st.subheader("Manage Your Students")
+        st.caption("Manually add students by their Google login email. This links their chat data to your dashboard.")
+        
+        # Add Student form
+        with st.form("add_student_form", clear_on_submit=True):
+            col_email, col_btn = st.columns([0.8, 0.2])
+            with col_email:
+                new_student_email = st.text_input("Student Email Address")
+            with col_btn:
+                st.write("") # spacing
+                submit_student = st.form_submit_button("➕ Add Student", use_container_width=True)
+            
+            if submit_student and new_student_email:
+                clean_email = new_student_email.strip().lower()
+                # Initialize them in DB if they don't exist, and link to this teacher
+                db.collection("users").document(clean_email).set({
+                    "role": "student",
+                    "teacher_id": user_email
+                }, merge=True)
+                st.success(f"Added {clean_email} to your classroom!")
+                time.sleep(1)
+                st.rerun()
+
+        st.divider()
+        
+        # List Current Students
+        st.subheader("Current Roster")
+        # Query Firestore for users who have this teacher_id
+        student_docs = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
+        
+        roster = list(student_docs)
+        if not roster:
+            st.info("You haven't added any students yet.")
+        else:
+            for student in roster:
+                s_email = student.id
+                c1, c2 = st.columns([0.85, 0.15])
+                with c1:
+                    st.write(f"🎓 **{s_email}**")
+                with c2:
+                    if st.button("Remove", key=f"rem_{s_email}", use_container_width=True):
+                        # Unlink them by setting teacher_id to None
+                        db.collection("users").document(s_email).update({"teacher_id": None})
+                        st.rerun()
+
+    # --- TAB 2: Analytics (Placeholder for Phase 2) ---
+    with tab2:
+        st.subheader("Student Insights")
+        st.info("Coming Soon: View individual student weak points, most asked questions, and AI accuracy evaluations based on their chat history.")
+        
+    # --- TAB 3: Assignments (Placeholder for Phase 3) ---
+    with tab3:
+        st.subheader("Assignment Creator")
+        st.info("Coming Soon: Generate AI practice papers and push them directly to your students' chat interfaces.")
+        
+    st.stop() # Halts execution here so teachers don't see the chat interface below
+
+# ==========================================
+# STUDENT CHAT VIEW (Runs if role is Student/Guest)
+# ==========================================
 st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Your CIE Tutor for Grade 6-8!</div>", unsafe_allow_html=True)
 
@@ -441,23 +508,19 @@ except Exception as e:
 # 6) HELPERS & LATEX CLEANER
 # -----------------------------
 def get_friendly_name(filename: str) -> str:
-    if not filename:
-        return "Cambridge Textbook"
+    if not filename: return "Cambridge Textbook"
     name = filename.replace(".pdf", "").replace(".PDF", "")
     parts = name.split("_")
-    if len(parts) < 3 or parts[0] != "CIE":
-        return filename
+    if len(parts) < 3 or parts[0] != "CIE": return filename
     grade = parts[1]
     book_type = "Workbook" if "WB" in parts else "Textbook"
-    if "ANSWERS" in parts:
-        book_type += " Answers"
+    if "ANSWERS" in parts: book_type += " Answers"
     subject = "Science" if "Sci" in parts else "Math" if "Math" in parts else "English" if "Eng" in parts else "Subject"
     part_str = " (Part 1)" if "1" in parts[2:] else " (Part 2)" if "2" in parts[2:] else ""
     return f"Cambridge {subject} {book_type} {grade}{part_str}"
 
 def md_inline_to_rl(text: str) -> str:
-    if text is None:
-        return ""
+    if text is None: return ""
     s = str(text)
     s = s.replace(r'\(', '').replace(r'\)', '').replace(r'\[', '').replace(r'\]', '')
     s = s.replace(r'\times', ' x ').replace(r'\div', ' ÷ ').replace(r'\circ', '°')
@@ -475,13 +538,7 @@ def md_inline_to_rl(text: str) -> str:
 # -----------------------------
 def generate_single_image(desc: str):
     clean_desc = re.sub(r"\s+", " ", (desc or "")).strip()
-    
-    models_to_try = [
-        "gemini-3-pro-image-preview",
-        "gemini-3.1-flash-image-preview", 
-        "gemini-2.5-flash-image"
-    ]
-    
+    models_to_try = ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"]
     for model_name in models_to_try:
         try:
             img_resp = client.models.generate_content(
@@ -489,21 +546,15 @@ def generate_single_image(desc: str):
                 contents=[clean_desc],
                 config=types.GenerateContentConfig(
                     response_modalities=["TEXT", "IMAGE"],
-                    image_config=types.ImageConfig(
-                        aspect_ratio="16:9",
-                        image_size="2K" 
-                    )
+                    image_config=types.ImageConfig(aspect_ratio="16:9", image_size="2K")
                 ),
             )
-            
             for part in (img_resp.parts or []):
                 if getattr(part, "inline_data", None):
                     return part.inline_data.data
-                    
         except Exception as e:
             print(f"{model_name} failed: {e}")
             continue
-            
     return None
 
 def generate_pie_chart(data_str: str):
@@ -514,21 +565,14 @@ def generate_pie_chart(data_str: str):
                 k, v = item.split(":", 1)
                 labels.append(k.strip())
                 sizes.append(float(re.sub(r"[^\d\.]", "", v)))
-
-        if not labels or not sizes or len(labels) != len(sizes):
-            return None
+        if not labels or not sizes or len(labels) != len(sizes): return None
 
         fig = Figure(figsize=(5, 5), dpi=200)
         FigureCanvas(fig)
         ax = fig.add_subplot(111)
-
         theme_colors = ["#00d4ff", "#fc8404", "#2ecc71", "#9b59b6", "#f1c40f", "#e74c3c"]
-        ax.pie(
-            sizes, labels=labels, autopct="%1.1f%%", startangle=140,
-            colors=theme_colors[: len(labels)], textprops={"color": "black", "fontsize": 9}
-        )
+        ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=140, colors=theme_colors[: len(labels)], textprops={"color": "black", "fontsize": 9})
         ax.axis("equal")
-
         buf = BytesIO()
         fig.savefig(buf, format="png", bbox_inches="tight", transparent=True)
         return buf.getvalue()
@@ -538,10 +582,8 @@ def generate_pie_chart(data_str: str):
 
 def process_visual(prompt_data):
     trigger_type, data = prompt_data
-    if trigger_type == "IMAGE_GEN":
-        return generate_single_image(data)
-    if trigger_type == "PIE_CHART":
-        return generate_pie_chart(data)
+    if trigger_type == "IMAGE_GEN": return generate_single_image(data)
+    if trigger_type == "PIE_CHART": return generate_pie_chart(data)
     return None
 
 # -----------------------------
@@ -550,30 +592,16 @@ def process_visual(prompt_data):
 def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
     buffer = BytesIO()
     doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
-        rightMargin=0.75 * inch, leftMargin=0.75 * inch,
+        buffer, pagesize=A4, rightMargin=0.75 * inch, leftMargin=0.75 * inch,
         topMargin=0.75 * inch, bottomMargin=0.75 * inch
     )
-
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "CustomTitle", parent=styles["Heading1"], fontSize=18,
-        textColor=colors.HexColor("#00d4ff"), spaceAfter=12,
-        alignment=TA_CENTER, fontName="Helvetica-Bold"
-    )
-    heading_style = ParagraphStyle(
-        "CustomHeading", parent=styles["Heading2"], fontSize=14,
-        spaceAfter=10, spaceBefore=10, fontName="Helvetica-Bold"
-    )
-    body_style = ParagraphStyle(
-        "CustomBody", parent=styles["BodyText"], fontSize=11,
-        spaceAfter=8, alignment=TA_LEFT, fontName="Helvetica"
-    )
+    title_style = ParagraphStyle("CustomTitle", parent=styles["Heading1"], fontSize=18, textColor=colors.HexColor("#00d4ff"), spaceAfter=12, alignment=TA_CENTER, fontName="Helvetica-Bold")
+    heading_style = ParagraphStyle("CustomHeading", parent=styles["Heading2"], fontSize=14, spaceAfter=10, spaceBefore=10, fontName="Helvetica-Bold")
+    body_style = ParagraphStyle("CustomBody", parent=styles["BodyText"], fontSize=11, spaceAfter=8, alignment=TA_LEFT, fontName="Helvetica")
 
     story = []
-    if not content:
-        content = "⚠️ No content to export."
-
+    if not content: content = "⚠️ No content to export."
     lines = str(content).split("\n")
     start_index = 0
     for i, line in enumerate(lines[:5]):
@@ -586,14 +614,12 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
     skip_sources = False
     for line in lines:
         stripped = line.strip()
-        if "[PDF_READY]" in stripped:
-            continue
+        if "[PDF_READY]" in stripped: continue
         if stripped.startswith("Source(s):") or stripped.startswith("**Source(s):**"):
             skip_sources = True
             continue
         if skip_sources:
-            if not stripped or stripped.startswith("*") or stripped.startswith("-"):
-                continue
+            if not stripped or stripped.startswith("*") or stripped.startswith("-"): continue
             skip_sources = False
         clean_line = re.sub(r"\s*\(Source:.*?\)", "", line)
         cleaned_lines.append(clean_line)
@@ -603,8 +629,7 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
 
     def render_pending_table():
         nonlocal table_rows
-        if not table_rows:
-            return
+        if not table_rows: return
         ncols = max(len(r) for r in table_rows)
         norm_rows = []
         for r in table_rows:
@@ -612,14 +637,10 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
             norm_rows.append([Paragraph(md_inline_to_rl(c), body_style) for c in r2])
         t = Table(norm_rows, colWidths=[doc.width / max(1, ncols)] * ncols)
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#00d4ff")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8f9fa")),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#00d4ff")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"), ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8f9fa")), ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ]))
         story.append(t)
         story.append(Spacer(1, 0.18 * inch))
@@ -631,8 +652,7 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
 
         if s.startswith("|") and s.endswith("|") and s.count("|") >= 2:
             cells = [c.strip() for c in s.split("|")[1:-1]]
-            if all(re.fullmatch(r":?-+:?", c) for c in cells if c):
-                continue
+            if all(re.fullmatch(r":?-+:?", c) for c in cells if c): continue
             table_rows.append(cells)
             continue
         else:
@@ -652,8 +672,7 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
                     story.append(Spacer(1, 0.12 * inch))
                     story.append(RLImage(img_stream, width=4.6 * inch, height=4.6 * inch * aspect))
                     story.append(Spacer(1, 0.12 * inch))
-                except Exception:
-                    pass
+                except Exception: pass
             img_idx += 1
             continue
 
@@ -662,14 +681,10 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
             story.append(Paragraph(md_inline_to_rl(re.sub(r"^#+\s*", "", s)), title_style))
             continue
 
-        if s.startswith("# "):
-            story.append(Paragraph(md_inline_to_rl(s[2:].strip()), title_style))
-        elif s.startswith("## "):
-            story.append(Paragraph(md_inline_to_rl(s[3:].strip()), heading_style))
-        elif s.startswith("### "):
-            story.append(Paragraph(f"<b>{md_inline_to_rl(s[4:].strip())}</b>", body_style))
-        else:
-            story.append(Paragraph(md_inline_to_rl(line), body_style))
+        if s.startswith("# "): story.append(Paragraph(md_inline_to_rl(s[2:].strip()), title_style))
+        elif s.startswith("## "): story.append(Paragraph(md_inline_to_rl(s[3:].strip()), heading_style))
+        elif s.startswith("### "): story.append(Paragraph(f"<b>{md_inline_to_rl(s[4:].strip())}</b>", body_style))
+        else: story.append(Paragraph(md_inline_to_rl(line), body_style))
 
     render_pending_table()
     story.append(Spacer(1, 0.28 * inch))
@@ -747,17 +762,13 @@ def upload_textbooks():
         if t in existing_server_files:
             server_file = existing_server_files[t]
             if server_file.state.name == "ACTIVE":
-                if "sci" in t:
-                    active_files["sci"].append(server_file)
-                elif "math" in t:
-                    active_files["math"].append(server_file)
-                elif "eng" in t:
-                    active_files["eng"].append(server_file)
+                if "sci" in t: active_files["sci"].append(server_file)
+                elif "math" in t: active_files["math"].append(server_file)
+                elif "eng" in t: active_files["eng"].append(server_file)
                 continue
 
         found_path = pdf_map.get(t)
-        if not found_path:
-            continue
+        if not found_path: continue
 
         try:
             uploaded = client.files.upload(
@@ -766,20 +777,15 @@ def upload_textbooks():
             )
             start = time.time()
             while uploaded.state.name == "PROCESSING":
-                if time.time() - start > 180:
-                    break
+                if time.time() - start > 180: break
                 time.sleep(3)
                 uploaded = client.files.get(name=uploaded.name)
 
             if uploaded.state.name == "ACTIVE":
-                if "sci" in t:
-                    active_files["sci"].append(uploaded)
-                elif "math" in t:
-                    active_files["math"].append(uploaded)
-                elif "eng" in t:
-                    active_files["eng"].append(uploaded)
-        except Exception:
-            continue
+                if "sci" in t: active_files["sci"].append(uploaded)
+                elif "math" in t: active_files["math"].append(uploaded)
+                elif "eng" in t: active_files["eng"].append(uploaded)
+        except Exception: continue
 
     msg_placeholder.empty()
     return active_files
@@ -802,25 +808,18 @@ def select_relevant_books(query, file_dict):
     has_subject = is_math or is_sci or is_eng
     has_stage = stage_7 or stage_8 or stage_9
 
-    if not has_subject and not has_stage:
-        return []
+    if not has_subject and not has_stage: return []
 
-    if has_stage and not has_subject:
-        is_math = is_sci = is_eng = True
-    if has_subject and not has_stage:
-        stage_8 = True
+    if has_stage and not has_subject: is_math = is_sci = is_eng = True
+    if has_subject and not has_stage: stage_8 = True
 
     def add_books(subject_key, active):
-        if not active:
-            return
+        if not active: return
         for book in file_dict.get(subject_key, []):
             name = (book.display_name or "").lower()
-            if stage_7 and "cie_7" in name:
-                selected.append(book)
-            if stage_8 and "cie_8" in name:
-                selected.append(book)
-            if stage_9 and "cie_9" in name:
-                selected.append(book)
+            if stage_7 and "cie_7" in name: selected.append(book)
+            if stage_8 and "cie_8" in name: selected.append(book)
+            if stage_9 and "cie_9" in name: selected.append(book)
 
     add_books("math", is_math)
     add_books("sci", is_sci)
@@ -838,7 +837,7 @@ for idx, message in enumerate(st.session_state.messages):
         display_content = (message.get("content") or "").replace("[PDF_READY]", "").strip()
         st.markdown(display_content)
 
-        # RENDER IMAGES (Live vs Firebase History) WITH CAPTION
+        # RENDER IMAGES WITH CAPTION
         if message.get("images"):
             for img_bytes in message["images"]:
                 if img_bytes:
@@ -849,8 +848,7 @@ for idx, message in enumerate(st.session_state.messages):
                     try:
                         img_bytes = base64.b64decode(b64_str)
                         st.image(img_bytes, use_container_width=True, output_format="JPEG", caption="✨ Generated by helix.ai")
-                    except Exception:
-                        pass
+                    except Exception: pass
 
         if message.get("user_attachment_bytes"):
             mime = message.get("user_attachment_mime", "")
@@ -872,8 +870,7 @@ for idx, message in enumerate(st.session_state.messages):
                     mime="application/pdf",
                     key=f"download_{st.session_state.current_thread_id}_{idx}",
                 )
-            except Exception:
-                pass
+            except Exception: pass
 
 # -----------------------------
 # 13) MAIN LOOP
@@ -905,12 +902,9 @@ if chat_input_data:
     with st.chat_message("user"):
         st.markdown(prompt)
         if file_bytes:
-            if "image" in (file_mime or ""):
-                st.image(file_bytes, width=320)
-            elif "pdf" in (file_mime or ""):
-                st.caption(f"📄 *Attached: {file_name}*")
-            elif "text/plain" in (file_mime or "") or (file_name or "").endswith(".txt"):
-                st.caption(f"📝 *Attached: {file_name}*")
+            if "image" in (file_mime or ""): st.image(file_bytes, width=320)
+            elif "pdf" in (file_mime or ""): st.caption(f"📄 *Attached: {file_name}*")
+            elif "text/plain" in (file_mime or "") or (file_name or "").endswith(".txt"): st.caption(f"📝 *Attached: {file_name}*")
 
     with st.chat_message("assistant"):
         thinking_placeholder = st.empty()
@@ -925,10 +919,8 @@ if chat_input_data:
                 book_names = [get_friendly_name(b.display_name) for b in relevant_books]
                 st.caption(f"🔍 *Scanning Curriculum: {', '.join(book_names)}*")
             else:
-                if has_attachment:
-                    st.caption("🔍 *Analyzing attached file...*")
-                else:
-                    st.caption("⚡ *Quick reply (General Knowledge)*")
+                if has_attachment: st.caption("🔍 *Analyzing attached file...*")
+                else: st.caption("⚡ *Quick reply (General Knowledge)*")
 
             thinking_placeholder.markdown("""
                 <div class="thinking-container">
@@ -945,8 +937,7 @@ if chat_input_data:
                     current_prompt_parts.append(types.Part.from_bytes(data=file_bytes, mime_type=file_mime))
                 elif "pdf" in (file_mime or ""):
                     temp_pdf_path = f"temp_user_upload_{int(time.time())}.pdf"
-                    with open(temp_pdf_path, "wb") as f:
-                        f.write(file_bytes)
+                    with open(temp_pdf_path, "wb") as f: f.write(file_bytes)
                     user_uploaded_pdf = client.files.upload(file=temp_pdf_path)
                     while user_uploaded_pdf.state.name == "PROCESSING":
                         time.sleep(1)
@@ -954,9 +945,7 @@ if chat_input_data:
                     current_prompt_parts.append(types.Part.from_uri(file_uri=user_uploaded_pdf.uri, mime_type="application/pdf"))
                 elif "text/plain" in (file_mime or "") or (file_name or "").endswith(".txt"):
                     raw_text = file_bytes.decode("utf-8", errors="ignore")
-                    current_prompt_parts.append(types.Part.from_text(
-                        text=f"--- Attached Text File ({file_name}) ---\n{raw_text}\n--- End of File ---\n"
-                    ))
+                    current_prompt_parts.append(types.Part.from_text(text=f"--- Attached Text File ({file_name}) ---\n{raw_text}\n--- End of File ---\n"))
 
             for book in relevant_books:
                 friendly = get_friendly_name(book.display_name)
@@ -972,9 +961,7 @@ if chat_input_data:
             text_msgs = [m for m in st.session_state.messages[:-1] if not m.get("is_greeting")]
             for msg in text_msgs[-7:]:
                 role = "user" if msg["role"] == "user" else "model"
-                history_contents.append(types.Content(
-                    role=role, parts=[types.Part.from_text(text=msg.get("content") or "")]
-                ))
+                history_contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.get("content") or "")]))
 
             full_contents = history_contents + [current_content]
 
@@ -1032,7 +1019,6 @@ if chat_input_data:
             # --- AUTO-TITLE LOGIC ---
             if is_authenticated:
                 user_msg_count = sum(1 for m in st.session_state.messages if m.get("role") == "user")
-                # Trigger on first message
                 if user_msg_count == 1:
                     coll_ref = get_threads_collection()
                     if coll_ref and st.session_state.current_thread_id:
@@ -1057,5 +1043,4 @@ if chat_input_data:
             try:
                 if "temp_pdf_path" in locals() and temp_pdf_path and os.path.exists(temp_pdf_path):
                     os.remove(temp_pdf_path)
-            except Exception:
-                pass
+            except Exception: pass
