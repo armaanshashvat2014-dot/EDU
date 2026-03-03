@@ -910,7 +910,7 @@ if chat_input_data:
                 if has_attachment:
                     st.caption("🔍 *Analyzing attached file...*")
                 else:
-                    st.caption("⚡ *Quick reply (General Knowledge)*")
+                    st.caption("⚡ General Knowledge")
 
             thinking_placeholder.markdown("""
                 <div class="thinking-container">
