@@ -466,7 +466,7 @@ with st.sidebar:
 
         st.divider()
 
-        if user_role == "student":
+                if user_role == "student":
             assigned_teacher = user_profile.get("teacher_id", None)
             if not assigned_teacher:
                 with st.expander("🎓 Are you a Teacher?"):
@@ -481,7 +481,20 @@ with st.sidebar:
                         else:
                             st.error("Invalid Code.")
             else:
-                st.info(f"🏫 Connected to classroom:\n**{assigned_teacher}**")
+                # NEW: Find the actual Class Name instead of showing the Teacher's Email
+                student_class_name = "Unknown Class"
+                if db is not None:
+                    # Search classes where this student's email is in the 'students' array
+                    class_query = db.collection("classes").where(
+                        filter=firestore.FieldFilter("students", "array_contains", user_email)
+                    ).limit(1).stream()
+                    
+                    for c in class_query:
+                        student_class_name = c.id  # This will be "6A", "7B", etc.
+                        break
+                        
+                st.info(f"🏫 Connected to class:\n**{student_class_name}**")
+
 
     sidebar_threads = get_all_threads() if is_authenticated else []
 
