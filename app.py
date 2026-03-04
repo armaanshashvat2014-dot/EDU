@@ -810,48 +810,62 @@ if user_role == "teacher":
     st.markdown("<div class='big-title' style='color:#fc8404;'>👨‍🏫 helix.ai / Teacher</div>", unsafe_allow_html=True)
     st.markdown("<div class='subtitle'>Classroom Management & AI Assistant</div>", unsafe_allow_html=True)
 
+    
     AVAILABLE_SUBJECTS = ["Math", "Biology", "Chemistry", "Physics", "English"]
 
+    # 1. Fetch roster
     student_docs_raw = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
     roster = list(student_docs_raw)
 
+    # 2. Render Menu safely
     teacher_menu = st.radio(
-        "Teacher Menu",
-        ["⚙️ Class Management", "📊 Student Analytics", "📝 Assign Papers", "💬 AI Chat"],
-        horizontal=True,
+        "Teacher Menu", 
+        ["Class Management", "Student Analytics", "Assign Papers", "AI Chat"], 
+        horizontal=True, 
         label_visibility="collapsed"
     )
     st.divider()
 
-    # ── MENU 1: CLASS MANAGEMENT
-    if teacher_menu == "⚙️ Class Management":
+    # ==========================================
+    # MENU 1: CLASS MANAGEMENT
+    # ==========================================
+    if teacher_menu == "Class Management":
         st.subheader("🏫 Class Management")
+        
         with st.form("create_class_form", clear_on_submit=True):
             cc1, cc2, cc3 = st.columns([0.4, 0.3, 0.3])
             with cc1: grade_choice = st.selectbox("Grade", ["Grade 6", "Grade 7", "Grade 8"])
             with cc2: section_choice = st.selectbox("Section", ["A", "B", "C", "D"])
             with cc3:
                 st.write("")
-                submit_class = st.form_submit_button("➕ Create", use_container_width=True)
+                submit_class = st.form_submit_button("Create", use_container_width=True)
+                
             if submit_class:
                 grade_num = grade_choice.split()[-1]
                 class_id = f"{grade_num}{section_choice}".upper()
                 success, msg = create_global_class(class_id, user_email, grade_choice, section_choice)
-                if success: st.success(msg); time.sleep(1); st.rerun()
-                else: st.error(msg)
-
+                if success:
+                    st.success(msg)
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(msg)
+                    
         st.divider()
-        st.subheader("Add Students to a Class")
+        st.subheader("➕ Add Students to a Class")
         my_classes_raw = list(db.collection("classes").where(filter=firestore.FieldFilter("created_by", "==", user_email)).stream())
+        
         if my_classes_raw:
             class_names = [c.id for c in my_classes_raw]
-            sel_class = st.selectbox("Select Class to Add Student:", class_names, key="add_student_class_sel")
+            sel_class = st.selectbox("Select Class to Add Student", class_names, key="add_student_class_sel")
+            
             with st.form("add_student_form", clear_on_submit=True):
-                c_em, c_btn = st.columns([0.8, 0.2])
-                with c_em: new_email = st.text_input("Student Email Address")
-                with c_btn:
+                cem, cbtn = st.columns([0.8, 0.2])
+                with cem: new_email = st.text_input("Student Email Address")
+                with cbtn:
                     st.write("")
-                    submit_stud = st.form_submit_button("➕ Add", use_container_width=True)
+                    submit_stud = st.form_submit_button("Add", use_container_width=True)
+                    
                 if submit_stud and new_email:
                     cln_email = new_email.strip().lower()
                     db.collection("users").document(cln_email).set({"role": "student", "teacher_id": user_email}, merge=True)
@@ -859,57 +873,61 @@ if user_role == "teacher":
                     st.success(f"Added {cln_email} to {sel_class}!")
                     time.sleep(1)
                     st.rerun()
-
+                    
         st.divider()
-        st.subheader("Your Active Classes")
-        if not my_classes_raw: st.info("You haven't created any classes yet.")
+        st.subheader("📚 Your Active Classes")
+        if not my_classes_raw:
+            st.info("You haven't created any classes yet.")
         else:
             for c in my_classes_raw:
-                c_data = c.to_dict()
-                c_name = c.id
-                c_subj = c_data.get("subjects", [])
-                c_studs = c_data.get("students", [])
-
-                with st.expander(f"📁 {c_name}  ·  {len(c_studs)} Students  ·  📚 {', '.join(c_subj) if c_subj else 'No subjects'}"):
-                    st.markdown("**Subjects You Teach in This Class:**")
+                cdata = c.to_dict()
+                cname = c.id
+                csubj = cdata.get("subjects", [])
+                cstuds = cdata.get("students", [])
+                
+                with st.expander(f"🏫 {cname} • {len(cstuds)} Students • {', '.join(csubj) if csubj else 'No subjects'}"):
+                    st.markdown("**Subjects You Teach in This Class**")
                     new_subjs = []
-                    s_cols = st.columns(len(AVAILABLE_SUBJECTS))
+                    scols = st.columns(len(AVAILABLE_SUBJECTS))
                     for i, subject in enumerate(AVAILABLE_SUBJECTS):
-                        with s_cols[i]:
-                            if st.checkbox(subject, value=(subject in c_subj), key=f"subj_{c_name}_{subject}"):
+                        with scols[i]:
+                            if st.checkbox(subject, value=(subject in csubj), key=f"subj_{cname}_{subject}"):
                                 new_subjs.append(subject)
-                    c_save, c_del = st.columns([0.7, 0.3])
-                    with c_save:
-                        if st.button("💾 Save Subjects", key=f"save_subj_{c_name}", use_container_width=True):
-                            db.collection("classes").document(c_name).update({"subjects": new_subjs})
-                            st.success("Saved!"); time.sleep(0.8); st.rerun()
-                    with c_del:
-                        if st.button("🗑️ Delete Class", key=f"del_class_{c_name}", type="primary", use_container_width=True):
-                            db.collection("classes").document(c_name).delete()
+                                
+                    csave, cdel = st.columns([0.7, 0.3])
+                    with csave:
+                        if st.button("💾 Save Subjects", key=f"save_subj_{cname}", use_container_width=True):
+                            db.collection("classes").document(cname).update({"subjects": new_subjs})
+                            st.success("Saved!")
+                            time.sleep(0.8)
                             st.rerun()
-
-                    st.markdown("**Students in this class:**")
-                    if not c_studs: st.caption("No students added yet.")
+                    with cdel:
+                        if st.button("🗑️ Delete Class", key=f"del_class_{cname}", type="primary", use_container_width=True):
+                            db.collection("classes").document(cname).delete()
+                            st.rerun()
+                            
+                    st.markdown("**Students in this class**")
+                    if not cstuds:
+                        st.caption("No students added yet.")
                     else:
-                        for s_email in c_studs:
-                            s_doc = db.collection("users").document(s_email).get()
-                            s_name = s_doc.to_dict().get("display_name", s_email.split("@")[0]) if s_doc.exists else s_email.split("@")[0]
+                        for semail in cstuds:
+                            sdoc = db.collection("users").document(semail).get()
+                            sname = sdoc.to_dict().get("display_name", semail.split("@")[0]) if sdoc.exists else semail.split("@")[0]
                             r1, r2 = st.columns([0.85, 0.15])
-                            with r1: st.write(f"🎓 **{s_name}** ({s_email})")
+                            with r1: st.write(f"🎓 **{sname}** ({semail})")
                             with r2:
-                                if st.button("Remove", key=f"rem_{c_name}_{s_email}", use_container_width=True):
-                                    db.collection("classes").document(c_name).update({"students": firestore.ArrayRemove([s_email])})
-                                    db.collection("users").document(s_email).update({"teacher_id": None})
+                                if st.button("Remove", key=f"rem_{cname}_{semail}", use_container_width=True):
+                                    db.collection("classes").document(cname).update({"students": firestore.ArrayRemove([semail])})
+                                    db.collection("users").document(semail).update({"teacher_id": None})
                                     st.rerun()
 
-    # ── MENU 2: STUDENT ANALYTICS
+    # ==========================================
+    # MENU 2: STUDENT ANALYTICS
+    # ==========================================
     elif teacher_menu == "Student Analytics":
         st.subheader("📊 Student Insights & Learning Gaps")
         
         try:
-            student_docs_raw = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
-            roster = list(student_docs_raw)
-            
             if not roster:
                 st.warning("⚠️ No students found. Please go to **Class Management** and add students to a class first.")
             else:
@@ -958,10 +976,8 @@ if user_role == "teacher":
                     score_count = 0
                     chapter_stats = {}
 
-                    # --- FIXED INDENTATION STARTS HERE ---
                     for doc in analytics_docs:
                         data = doc.to_dict()
-                        
                         doc_subject = data.get("subject", "General")
                         
                         if tsubjs:
@@ -994,7 +1010,6 @@ if user_role == "teacher":
                         qa = data.get("question_asked")
                         if qa and str(qa).lower() not in ["none", "null", ""]:
                             recent_q.append(qa)
-                    # --- FIXED INDENTATION ENDS HERE ---
 
                     health = int(total_score / score_count) if score_count > 0 else 0
                     
@@ -1040,7 +1055,8 @@ if user_role == "teacher":
                             else: st.write("No questions recently.")
 
         except Exception as e:
-            st.error(f"A critical error occurred while loading analytics: {e}")
+            st.error(f"Error loading analytics: {str(e)}")
+
 
 
 
