@@ -971,7 +971,7 @@ if user_role == "teacher":
                     if tsubjs and doc_subject not in tsubjs:
                         continue
                         
-                     score = data.get("score")
+                    score = data.get("score")
                     ch_num = data.get("chapter_number", 0)
                     ch_name = data.get("chapter_name", "General Concepts")
                     
