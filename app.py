@@ -128,8 +128,7 @@ def get_user_profile(email):
             "display_name": google_name,
             "grade": "Grade 6" 
         }
-
-        }
+        
         doc_ref.set(default_profile)
         return default_profile
 
