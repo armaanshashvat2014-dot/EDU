@@ -925,7 +925,6 @@ if user_role == "teacher":
                 all_grades = sorted(set(v["grade"] for v in student_lookup.values()))
                 grade_filter = st.selectbox("Filter by Grade", ["All Grades"] + all_grades)
                 
-                # Removed time filter temporarily to prevent cutoff crashes
                 filtered_students = {
                     e: inf for e, inf in student_lookup.items()
                     if (search_query.lower() in inf["name"].lower() or not search_query) and
@@ -959,12 +958,13 @@ if user_role == "teacher":
                     score_count = 0
                     chapter_stats = {}
 
+                    # --- FIXED INDENTATION STARTS HERE ---
                     for doc in analytics_docs:
                         data = doc.to_dict()
                         
                         doc_subject = data.get("subject", "General")
+                        
                         if tsubjs:
-                            # Safely check if the subject matches
                             if not any(doc_subject.lower() in t.lower() or t.lower() in doc_subject.lower() for t in tsubjs):
                                 continue
                             
@@ -994,6 +994,7 @@ if user_role == "teacher":
                         qa = data.get("question_asked")
                         if qa and str(qa).lower() not in ["none", "null", ""]:
                             recent_q.append(qa)
+                    # --- FIXED INDENTATION ENDS HERE ---
 
                     health = int(total_score / score_count) if score_count > 0 else 0
                     
@@ -1037,8 +1038,10 @@ if user_role == "teacher":
                             if recent_q:
                                 for q in recent_q[:5]: st.info(q)
                             else: st.write("No questions recently.")
+
         except Exception as e:
             st.error(f"A critical error occurred while loading analytics: {e}")
+
 
 
     # ── MENU 3: ASSIGN PAPERS
