@@ -982,12 +982,10 @@ if user_role == "teacher":
                     total_score += score
                     score_count += 1
 
-                        total_score += score
-                        score_count += 1
          
-                        ch_key = f"{doc_subject} | Ch {ch_num}: {ch_name}" if ch_num > 0 else f"{doc_subject} | {ch_name}"
-                        if ch_key not in chapter_stats:
-                            chapter_stats[ch_key] = {"total": 0, "count": 0}
+                    ch_key = f"{doc_subject} | Ch {ch_num}: {ch_name}" if ch_num > 0 else f"{doc_subject} | {ch_name}"
+                    if ch_key not in chapter_stats:
+                        chapter_stats[ch_key] = {"total": 0, "count": 0}
                         chapter_stats[ch_key]["total"] += score
                         chapter_stats[ch_key]["count"] += 1
 
