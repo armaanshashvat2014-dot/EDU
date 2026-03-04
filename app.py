@@ -905,10 +905,14 @@ if user_role == "teacher":
     # ── MENU 2: STUDENT ANALYTICS
     elif teacher_menu == "Student Analytics":
         st.subheader("📊 Student Insights & Learning Gaps")
-        if not roster:
-            st.info("Add students in the Class Management tab to view their analytics.")
+        
+        student_docs_raw = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
+        roster = list(student_docs_raw)
+        
+        if len(roster) == 0:
+            st.warning("⚠️ No students found. Please go to **Class Management** and add students to a class first.")
         else:
-            # 1. Setup Student Lookup & Filters
+            
             student_lookup = {}
             for s in roster:
                 d = s.to_dict()
@@ -918,6 +922,7 @@ if user_role == "teacher":
                 }
 
             search_query = st.text_input("🔍 Search student by name...")
+
             all_grades = sorted(set(v["grade"] for v in student_lookup.values()))
             grade_filter = st.selectbox("Filter by Grade", ["All Grades"] + all_grades)
             time_filter = st.radio("Show interactions from", ["Last 12 Hours", "Last 24 Hours", "Last 3 Days", "Last 7 Days"], horizontal=True)
