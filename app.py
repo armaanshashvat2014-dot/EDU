@@ -642,7 +642,7 @@ with st.sidebar:
     else:
         user_name = auth_object.get("name", "User")
         role_display = f"\n{user_role.capitalize()}" if user_role not in ["undefined", "guest"] else ""
-        st.success(f"Welcome back, {username}!{role_display}")
+        st.success(f"Welcome back, {user_name}!{role_display}")
 
         st.divider()
 
