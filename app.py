@@ -1206,6 +1206,7 @@ if render_chat_interface:
     - If the user provides an IMAGE, PDF, or TXT file, analyze it carefully.
     - STEP 1: Search the attached PDF textbooks using OCR FIRST.
     - STEP 2: If the textbooks do not contain the answer, answer with your general knowledge
+    IMPORTANT: when you're creating questions for students, ALWAYS check the book when creating questions, because sometimes you might find related topics but the syllabus might not cover that topic. You might also give the wrong chapter number or name which we don't want. SO ALWAYS CHECK THE BOOK IF YOU KNOW THE STAGE AND SUBJECT OF THE BOOK.
 
     ### RULE 2: MATH ACCURACY (CRITICAL)
     - When generating math questions and mark schemes, you MUST solve the equations step-by-step internally before writing the final mark scheme.
@@ -1370,9 +1371,7 @@ RULES FOR ANALYTICS:
 
 
 ### RULE 8: Very Important: Grade Scheme
-The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 correlates to grade 7. When it's mentioned 7 in the book name, that means it's grade 6. When it's mentioned 8 in the book name, that means it's grade 7. When it's mentioned 9 in the book name, that means it's grade 8. Follow this new naming scheme. 
-
-ALSO IMPORTANT: when you're creating questions for students, one by one on different queries/answers, ALWAYS check the book when creating questions, because sometimes you might find related topics but the syllabus might not be in the students' book OR you might give the wrong chapter number or name which we don't want. SO ALWAYS CHECK THE BOOK IF YOU KNOW IT IS FROM THE BOOK. 
+The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 correlates to grade 7. When it's mentioned 7 in the book name, that means it's grade 6. When it's mentioned 8 in the book name, that means it's grade 7. When it's mentioned 9 in the book name, that means it's grade 8. Follow this new naming scheme.  
     """
 
     if is_authenticated and user_role == "student" and db is not None:
