@@ -1014,7 +1014,7 @@ if user_role == "teacher":
                     health = int(total_score / score_count) if score_count > 0 else 0
                     
                     if score_count == 0 and not recent_q:
-                        st.info(f"{selected_name} has no valid mathematical interactions yet.")
+                        st.info(f"{selected_name} has no interactions yet.")
                     else:
                         if health >= 80: s_lbl = f"🟢 {health}% (Excellent)"
                         elif health >= 50: s_lbl = f"🟠 {health}% (Average)"
