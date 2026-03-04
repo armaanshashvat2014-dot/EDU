@@ -626,10 +626,11 @@ with st.sidebar:
     
     allowed_admins = st.secrets.get("ADMIN_EMAILS", [])
     
-    if is_authenticated and auth_object.email in allowed_admins:
+    if is_authenticated and (user_email in allowed_admins):
         if st.button("⚙️ Admin Panel"):
             st.session_state["current_page"] = "admin"
             st.rerun()
+
 
     if not is_authenticated:
         st.markdown("You are chatting as a Guest!\nLog in with Google to save history!")
