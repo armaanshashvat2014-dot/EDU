@@ -1583,13 +1583,13 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                     # 5. Unsupported formats
                     else:
                         st.warning(f"Unsupported file type: {mime} ({filename})")
-
-                # Attach Curriculum Textbooks (with expiration check to prevent 403)
+                        
                 for book in relevant_books:
                     try:
                         # Verify the file still exists on Google's servers
                         verified_book = client.files.get(name=book.name)
                         friendly = get_friendly_name(verified_book.display_name)
+                        
                         current_prompt_parts.append(
                             types.Part.from_text(text=f"Source Document: {friendly}")
                         )
@@ -1599,11 +1599,11 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                                 mime_type="application/pdf"
                             )
                         )
-                    except Exception:
-                        # If Google deleted the file (happens after 48h), force a re-upload
-                        st.session_state.textbook_handles = upload_textbooks()
-                        st.error("Textbook cache expired. We just refreshed it, please ask your question again!")
+                    except Exception as e:
+                        # THIS WILL SHOW THE REAL BUG on your Streamlit screen
+                        st.error(f"🚨 Debug - The real error is: {type(e).__name__}: {str(e)}")
                         st.stop()
+
 
                 # Finally, attach the user's prompt
                 current_prompt_parts.append(
