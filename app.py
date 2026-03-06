@@ -48,6 +48,8 @@ st.markdown("""
 .thinking-dot:nth-child(2){ animation-delay: 0.2s; }
 .thinking-dot:nth-child(3){ animation-delay: 0.4s; }
 @keyframes thinking-pulse { 0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); } 30% { opacity: 1; transform: scale(1.2); } }
+
+/* Patch for Streamlit drag-and-drop stuck overlay bug */[data-testid="stFileUploaderDropzone"] { z-index: -1 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -148,7 +150,7 @@ def create_global_class(class_id, teacher_email, grade, section):
             "grade": grade,
             "section": section,
             "students": [],
-            "subjects": []
+            "subjects":[]
         })
         return True, f"Class '{clean_id}' created successfully!"
 
@@ -174,22 +176,22 @@ def get_all_threads():
     if coll_ref:
         try:
             docs = coll_ref.order_by("updated_at", direction=firestore.Query.DESCENDING).limit(15).stream()
-            threads = []
+            threads =[]
             for doc in docs:
                 data = doc.to_dict()
                 threads.append({
                     "id": doc.id,
                     "title": data.get("title", "New Chat"),
                     "updated_at": data.get("updated_at", 0),
-                    "metadata": data.get("metadata", {"subjects": [], "grades": []}),
+                    "metadata": data.get("metadata", {"subjects": [], "grades":[]}),
                     "user_edited_title": data.get("user_edited_title", False),
                 })
             return threads
         except Exception: pass
-    return []
+    return[]
 
 def get_default_greeting():
-    return [{
+    return[{
         "role": "assistant",
         "content": "👋 **Hey there! I'm Helix!**\n\nI'm your friendly CIE tutor here to help you ace your CIE exams! 📖\n\nI can answer your doubts, draw diagrams, and create quizzes!\nYou can also **attach photos, PDFs, or text files directly in the chat box below!** 📸📄\n\nWhat are we learning today?",
         "is_greeting": True,
@@ -200,7 +202,7 @@ def load_chat_history(thread_id):
     if coll_ref and thread_id:
         try:
             doc = coll_ref.document(thread_id).get()
-            if doc.exists: return doc.to_dict().get("messages", [])
+            if doc.exists: return doc.to_dict().get("messages",[])
         except Exception: pass
     return get_default_greeting()
 
@@ -209,9 +211,10 @@ def compress_image_for_db(image_bytes: bytes) -> str:
         if not image_bytes: return None
         img = Image.open(BytesIO(image_bytes))
         if img.mode != 'RGB': img = img.convert('RGB')
-        img.thumbnail((1280, 720), Image.Resampling.LANCZOS)
+        # Improved quality and resolution for UI rendering
+        img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
         buf = BytesIO()
-        img.save(buf, format="JPEG", quality=60, optimize=True)
+        img.save(buf, format="JPEG", quality=85, optimize=True)
         return base64.b64encode(buf.getvalue()).decode('utf-8')
     except Exception: return None
 
@@ -219,7 +222,7 @@ def save_chat_history():
     coll_ref = get_threads_collection()
     if not coll_ref: return
     current_id = st.session_state.current_thread_id
-    safe_messages = []
+    safe_messages =[]
     detected_subjects = set()
     detected_grades = set()
 
@@ -230,9 +233,9 @@ def save_chat_history():
             q = content_str.lower()
             if any(k in q for k in ["math", "algebra", "geometry", "calculate", "equation", "number", "fraction"]):
                 detected_subjects.add("Math")
-            if any(k in q for k in ["science", "cell", "biology", "physics", "chemistry", "experiment", "gravity"]):
+            if any(k in q for k in["science", "cell", "biology", "physics", "chemistry", "experiment", "gravity"]):
                 detected_subjects.add("Science")
-            if any(k in q for k in ["english", "poem", "story", "essay", "writing", "grammar", "noun", "verb"]):
+            if any(k in q for k in["english", "poem", "story", "essay", "writing", "grammar", "noun", "verb"]):
                 detected_subjects.add("English")
             
             qn = normalize_stage_text(content_str)
@@ -264,6 +267,71 @@ def save_chat_history():
     except Exception as e: st.toast(f"⚠️ Database Error: Could not save chat - {e}")
 
 # -----------------------------
+# GEMINI INIT & FILE HELPERS
+# -----------------------------
+api_key = os.environ.get("GOOGLE_API_KEY")
+if not api_key:
+    if "GOOGLE_API_KEY" in st.secrets: api_key = st.secrets["GOOGLE_API_KEY"]
+    else: st.error("🚨 GOOGLE_API_KEY not found."); st.stop()
+try: client = genai.Client(api_key=api_key)
+except Exception as e: st.error(f"🚨 Failed to initialize Gemini Client: {e}"); st.stop()
+
+# -----------------------------
+# GLOBAL VISUAL GENERATOR
+# -----------------------------
+def process_visual_wrapper(vp):
+    try:
+        v_type, v_data = vp
+        if v_type == "IMAGE_GEN":
+            # Graceful degradation fallback chain
+            models_to_try =[
+                'gemini-3-pro-image-preview',
+                'gemini-3.1-flash-image-preview',
+                'imagen-4.0-fast-generate-001',
+                'gemini-2.5-flash-image'
+            ]
+            
+            for model_name in models_to_try:
+                try:
+                    result = client.models.generate_images(
+                        model=model_name,
+                        prompt=v_data,
+                        config=types.GenerateImagesConfig(
+                            number_of_images=1,
+                            aspect_ratio="4:3"
+                        )
+                    )
+                    if result.generated_images:
+                        return result.generated_images[0].image.image_bytes
+                except Exception as e:
+                    print(f"Image gen error with {model_name}: {e}")
+                    continue # Catch error and fall back to the next model
+            
+            # If all fail:
+            return None
+
+        elif v_type == "PIE_CHART":
+            try:
+                labels, sizes = [],[]
+                for item in str(v_data).split(","):
+                    if ":" in item:
+                        k, v = item.split(":", 1)
+                        labels.append(k.strip())
+                        sizes.append(float(re.sub(r"[^\d\.]", "", v)))
+                if not labels or not sizes or len(labels) != len(sizes): return None
+                fig = Figure(figsize=(5, 5), dpi=200)
+                FigureCanvas(fig)
+                ax = fig.add_subplot(111)
+                theme_colors =["#00d4ff", "#fc8404", "#2ecc71", "#9b59b6", "#f1c40f", "#e74c3c"]
+                ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=140, colors=theme_colors[:len(labels)], textprops={"color": "black", "fontsize": 9})
+                ax.axis("equal")
+                buf = BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight", transparent=True)
+                return buf.getvalue()
+            except Exception: return None
+    except Exception: return None
+
+# -----------------------------
 # PDF HELPER
 # -----------------------------
 def md_inline_to_rl(text: str) -> str:
@@ -291,13 +359,13 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
     heading_style = ParagraphStyle("CustomHeading", parent=styles["Heading2"], fontSize=14, spaceAfter=10, spaceBefore=10, fontName="Helvetica-Bold")
     body_style = ParagraphStyle("CustomBody", parent=styles["BodyText"], fontSize=11, spaceAfter=8, alignment=TA_LEFT, fontName="Helvetica")
 
-    story = []
+    story =[]
     if not content: content = "⚠️ No content to export."
     lines = str(content).split("\n")
     start_index = next((i for i, line in enumerate(lines[:5]) if line.strip().startswith("#")), 0)
     lines = lines[start_index:]
 
-    cleaned_lines = []
+    cleaned_lines =[]
     skip_sources = False
     for line in lines:
         stripped = line.strip()
@@ -312,13 +380,13 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
         cleaned_lines.append(clean_line)
 
     img_idx = 0
-    table_rows = []
+    table_rows =[]
 
     def render_pending_table():
         nonlocal table_rows
         if not table_rows: return
         ncols = max(len(r) for r in table_rows)
-        norm_rows = []
+        norm_rows =[]
         for r in table_rows:
             r2 = list(r) + [""] * (ncols - len(r))
             norm_rows.append([Paragraph(md_inline_to_rl(c), body_style) for c in r2])
@@ -331,7 +399,7 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
         ]))
         story.append(t)
         story.append(Spacer(1, 0.18*inch))
-        table_rows = []
+        table_rows =[]
 
     for raw in cleaned_lines:
         s = raw.strip()
@@ -380,11 +448,11 @@ def safe_response_text(resp) -> str:
         if t: return str(t)
     except Exception: pass
     try:
-        cands = getattr(resp, "candidates", None) or []
+        cands = getattr(resp, "candidates", None) or[]
         if cands:
             content = getattr(cands[0], "content", None)
-            parts = getattr(content, "parts", None) or []
-            texts = [getattr(p, "text", None) for p in parts if getattr(p, "text", None)]
+            parts = getattr(content, "parts", None) or[]
+            texts =[getattr(p, "text", None) for p in parts if getattr(p, "text", None)]
             if texts: return "\n".join(texts)
     except Exception: pass
     return ""
@@ -395,7 +463,7 @@ def generate_chat_title(client, messages):
         if not user_msgs: return "New Chat"
         prompt = "Summarize this conversation context into a very short, punchy chat title (maximum 4 words). Do not use quotes or punctuation. Context: " + "\n".join(user_msgs[-3:])
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite", contents=[prompt],
+            model="gemini-2.5-flash", contents=[prompt],
             config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=50),
         )
         title = safe_response_text(response).strip().replace('"', '').replace("'", "")
@@ -445,8 +513,8 @@ def confirm_delete_chat_dialog(thread_id_to_delete):
 @st.dialog("⚙️ Chat Settings")
 def chat_settings_dialog(thread_data):
     st.markdown("**Chat Metadata**")
-    subs = ", ".join(thread_data.get("metadata", {}).get("subjects", [])) or "None"
-    grds = ", ".join(thread_data.get("metadata", {}).get("grades", [])) or "None"
+    subs = ", ".join(thread_data.get("metadata", {}).get("subjects",[])) or "None"
+    grds = ", ".join(thread_data.get("metadata", {}).get("grades",[])) or "None"
     st.caption(f"📚 **Subjects:** {subs}")
     st.caption(f"🎓 **Grades:** {grds}")
     st.divider()
@@ -498,7 +566,7 @@ def render_admin_panel():
         return
 
     admin_email = auth_object.email
-    allowed_admins = st.secrets.get("ADMIN_EMAILS", [])
+    allowed_admins = st.secrets.get("ADMIN_EMAILS",[])
 
     # Double-check they are on the allowed list
     if admin_email not in allowed_admins:
@@ -526,7 +594,7 @@ def render_admin_panel():
 
     with st.sidebar:
         st.markdown("<b style='color:#ff4d6d'>ADMIN NAVIGATION</b>", unsafe_allow_html=True)
-        admin_page = st.radio("", ["📊 Dashboard", "🎓 Students", "👩‍🏫 Teachers", "🏫 Classes", "🧪 AI Debug Lab"], label_visibility="collapsed")
+        admin_page = st.radio("",["📊 Dashboard", "🎓 Students", "👩‍🏫 Teachers", "🏫 Classes", "🧪 AI Debug Lab"], label_visibility="collapsed")
         st.markdown("---")
         if st.button("🚪 Exit Admin Mode", use_container_width=True):
             st.session_state["admin_authenticated"] = False
@@ -538,19 +606,24 @@ def render_admin_panel():
         st.markdown('<div class="section-header">📊 System Overview</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
         try:
-            c1.markdown(f'<div class="stat-card"><div class="stat-number">{len(list(db.collection("students").stream()))}</div><div class="stat-label">Students</div></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="stat-card"><div class="stat-number">{len(list(db.collection("teachers").stream()))}</div><div class="stat-label">Teachers</div></div>', unsafe_allow_html=True)
-            c3.markdown(f'<div class="stat-card"><div class="stat-number">{len(list(db.collection("classes").stream()))}</div><div class="stat-label">Classes</div></div>', unsafe_allow_html=True)
+            students_count = len(list(db.collection("users").where(filter=firestore.FieldFilter("role", "==", "student")).stream()))
+            teachers_count = len(list(db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()))
+            classes_count = len(list(db.collection("classes").stream()))
+            c1.markdown(f'<div class="stat-card"><div class="stat-number">{students_count}</div><div class="stat-label">Students</div></div>', unsafe_allow_html=True)
+            c2.markdown(f'<div class="stat-card"><div class="stat-number">{teachers_count}</div><div class="stat-label">Teachers</div></div>', unsafe_allow_html=True)
+            c3.markdown(f'<div class="stat-card"><div class="stat-number">{classes_count}</div><div class="stat-label">Classes</div></div>', unsafe_allow_html=True)
         except Exception as e: st.error(f"DB Error: {e}")
 
     # --- STUDENTS ---
     elif admin_page == "🎓 Students":
         st.markdown('<div class="section-header">🎓 Manage Students</div>', unsafe_allow_html=True)
         try:
-            students = [{"id": d.id, **d.to_dict()} for d in db.collection("students").stream()]
+            students =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "student")).stream()]
             if students:
-                rows = "".join(f"<tr><td>{s.get('name','—')}</td><td>{s.get('email','—')}</td><td>{s.get('grade','—')}</td><td><code>{s['id']}</code></td></tr>" for s in students)
+                rows = "".join(f"<tr><td>{s.get('display_name','—')}</td><td>{s.get('id','—')}</td><td>{s.get('grade','—')}</td><td><code>{s['id']}</code></td></tr>" for s in students)
                 st.markdown(f'<table class="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Grade</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            else:
+                st.info("No students registered.")
         except Exception as e: st.error(str(e))
         
         st.markdown('<div class="section-header">🗑️ Delete Student</div>', unsafe_allow_html=True)
@@ -559,7 +632,6 @@ def render_admin_panel():
         if st.button("🗑️ Permanently Delete Student", type="primary"):
             if del_id:
                 try:
-                    db.collection("students").document(del_id).delete()
                     db.collection("users").document(del_id).delete()
                     if cascade:
                         for t in db.collection("users").document(del_id).collection("threads").stream(): t.reference.delete()
@@ -572,24 +644,28 @@ def render_admin_panel():
     elif admin_page == "👩‍🏫 Teachers":
         st.markdown('<div class="section-header">👩‍🏫 Manage Teachers</div>', unsafe_allow_html=True)
         try:
-            teachers = [{"id": d.id, **d.to_dict()} for d in db.collection("teachers").stream()]
+            teachers =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()]
             if teachers:
-                rows = "".join(f"<tr><td>{t.get('name','—')}</td><td>{t.get('email','—')}</td><td><code>{t['id']}</code></td></tr>" for t in teachers)
+                rows = "".join(f"<tr><td>{t.get('display_name','—')}</td><td>{t.get('id','—')}</td><td><code>{t['id']}</code></td></tr>" for t in teachers)
                 st.markdown(f'<table class="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            else:
+                st.info("No teachers registered.")
         except Exception as e: st.error(str(e))
         del_t = st.text_input("Teacher Doc ID to delete")
         if st.button("Delete Teacher", type="primary") and del_t:
-            db.collection("teachers").document(del_t).delete()
+            db.collection("users").document(del_t).delete()
             st.success("Deleted")
 
     # --- CLASSES ---
     elif admin_page == "🏫 Classes":
         st.markdown('<div class="section-header">🏫 Manage Classes</div>', unsafe_allow_html=True)
         try:
-            classes = [{"id": d.id, **d.to_dict()} for d in db.collection("classes").stream()]
+            classes =[{"id": d.id, **d.to_dict()} for d in db.collection("classes").stream()]
             if classes:
-                rows = "".join(f"<tr><td>{c.get('name','—')}</td><td>{c.get('stage','—')}</td><td><code>{c['id']}</code></td></tr>" for c in classes)
-                st.markdown(f'<table class="admin-table"><thead><tr><th>Name</th><th>Stage</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+                rows = "".join(f"<tr><td>{c.get('name', c['id'])}</td><td>{c.get('grade','—')}</td><td><code>{c['id']}</code></td></tr>" for c in classes)
+                st.markdown(f'<table class="admin-table"><thead><tr><th>Name/ID</th><th>Grade</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            else:
+                st.info("No classes created.")
         except Exception as e: st.error(str(e))
         del_c = st.text_input("Class Doc ID to delete")
         if st.button("Delete Class", type="primary") and del_c:
@@ -599,7 +675,7 @@ def render_admin_panel():
     # --- AI DEBUG LAB ---
     elif admin_page == "🧪 AI Debug Lab":
         st.markdown('<div class="section-header">🧪 AI Debug Lab</div>', unsafe_allow_html=True)
-        m_choice = st.selectbox("Model", ["gemini-2.5-flash-preview-04-17", "gemini-2.0-flash"])
+        m_choice = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
         d_prompt = st.text_area("User Prompt")
         if st.button("▶️ Run Prompt"):
             with st.spinner("Running..."):
@@ -625,7 +701,7 @@ with st.sidebar:
     st.title("Account Settings")
     
     raw_admins = st.secrets.get("ADMIN_EMAILS", [])
-    allowed_admins = [email.lower() for email in raw_admins]
+    allowed_admins =[email.lower() for email in raw_admins]
     
     if is_authenticated and user_email:
 
@@ -636,19 +712,24 @@ with st.sidebar:
                 st.session_state["current_page"] = "admin"
                 st.rerun()
 
-
-
     if not is_authenticated:
         st.markdown("You are chatting as a Guest!\nLog in with Google to save history!")
         if st.button("Log in with Google", type="primary", use_container_width=True):
-            st.login(provider="google")
+            try:
+                st.login(provider="google")
+            except Exception as e:
+                st.error("Authentication Error: Streamlit Auth is likely not configured in your Cloud Settings.")
     else:
         username = getattr(auth_object, "name", None) or (user_email.split("@")[0] if user_email else "User")
         role_display = f"\n{user_role.capitalize()}" if user_role not in ["undefined", "guest"] else ""
         st.success(f"Welcome back, {username}!{role_display}")
         
         if st.button("Log out"):
-            st.logout()
+            try:
+                st.logout()
+            except Exception:
+                st.session_state.clear()
+                st.rerun()
 
         st.divider()
 
@@ -679,7 +760,7 @@ with st.sidebar:
                         
                 st.info(f"🏫 Connected to class:\n**{student_class_name}**")
 
-    sidebar_threads = get_all_threads() if is_authenticated else []
+    sidebar_threads = get_all_threads() if is_authenticated else[]
 
     if st.button("➕ New Chat", use_container_width=True):
         if is_authenticated and len(sidebar_threads) >= 15:
@@ -706,17 +787,6 @@ with st.sidebar:
 
 if st.session_state.delete_requested_for:
     confirm_delete_chat_dialog(st.session_state.delete_requested_for)
-
-# -----------------------------
-# GEMINI INIT & FILE HELPERS
-# -----------------------------
-api_key = os.environ.get("GOOGLE_API_KEY")
-if not api_key:
-    if "GOOGLE_API_KEY" in st.secrets: api_key = st.secrets["GOOGLE_API_KEY"]
-    else: st.error("🚨 GOOGLE_API_KEY not found."); st.stop()
-try: client = genai.Client(api_key=api_key)
-except Exception as e: st.error(f"🚨 Failed to initialize Gemini Client: {e}"); st.stop()
-
 
 def get_friendly_name(filename: str) -> str:
     if not filename: return "Cambridge Textbook"
@@ -748,12 +818,12 @@ def is_image_mime(m: str) -> bool:
 
 @st.cache_resource(show_spinner=False)
 def upload_textbooks():
-    target_filenames = [
+    target_filenames =[
         "CIE_9_WB_Sci.pdf", "CIE_9_SB_Math.pdf", "CIE_9_SB_2_Sci.pdf", "CIE_9_SB_1_Sci.pdf", "CIE_9_SB_Eng.pdf", "CIE_9_WB_Eng.pdf",
         "CIE_8_WB_Sci.pdf", "CIE_8_WB_ANSWERS_Math.pdf", "CIE_8_SB_Math.pdf", "CIE_8_SB_2_Sci.pdf", "CIE_8_SB_2_Eng.pdf", "CIE_8_SB_1_Sci.pdf", "CIE_8_SB_1_Eng.pdf",
         "CIE_7_WB_Sci.pdf", "CIE_7_WB_Math.pdf", "CIE_7_WB_Eng.pdf", "CIE_7_WB_ANSWERS_Math.pdf", "CIE_7_SB_Math.pdf", "CIE_7_SB_2_Sci.pdf", "CIE_7_SB_2_Eng.pdf", "CIE_7_SB_1_Sci.pdf", "CIE_7_SB_1_Eng.pdf",
     ]
-    active_files = {"sci": [], "math": [], "eng": []}
+    active_files = {"sci": [], "math":[], "eng":[]}
     msg_placeholder = st.empty()
     with msg_placeholder.chat_message("assistant"):
         st.markdown("""<div class="thinking-container"><span class="thinking-text">📚 Scanning Books...</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
@@ -796,10 +866,10 @@ if is_authenticated and "textbook_handles" not in st.session_state:
 
 def select_relevant_books(query, file_dict):
     qn = normalize_stage_text(query)
-    selected = []
-    is_math = any(k in qn for k in ["math", "algebra", "geometry", "calculate", "equation", "number", "fraction"])
+    selected =[]
+    is_math = any(k in qn for k in["math", "algebra", "geometry", "calculate", "equation", "number", "fraction"])
     is_sci = any(k in qn for k in ["science", "cell", "biology", "physics", "chemistry", "experiment", "gravity"])
-    is_eng = any(k in qn for k in ["english", "poem", "story", "essay", "writing", "grammar", "noun", "verb"])
+    is_eng = any(k in qn for k in["english", "poem", "story", "essay", "writing", "grammar", "noun", "verb"])
     
     explicit_stage = infer_stage_from_text(qn)
     stage_7 = (explicit_stage == "Stage 7")
@@ -808,13 +878,13 @@ def select_relevant_books(query, file_dict):
     has_subject = is_math or is_sci or is_eng
     has_stage = stage_7 or stage_8 or stage_9
     
-    if not has_subject and not has_stage: return []
+    if not has_subject and not has_stage: return[]
     if has_stage and not has_subject: is_math = is_sci = is_eng = True
     if has_subject and not has_stage: stage_8 = True # default
 
     def add_books(subject_key, active):
         if not active: return
-        for book in file_dict.get(subject_key, []):
+        for book in file_dict.get(subject_key,[]):
             name = (book.display_name or "").lower()
             if stage_7 and "cie_7" in name: selected.append(book)
             if stage_8 and "cie_8" in name: selected.append(book)
@@ -835,7 +905,7 @@ if user_role == "teacher":
     st.markdown("<div class='subtitle'>Classroom Management & AI Assistant</div>", unsafe_allow_html=True)
 
     
-    AVAILABLE_SUBJECTS = ["Math", "Biology", "Chemistry", "Physics", "English"]
+    AVAILABLE_SUBJECTS =["Math", "Biology", "Chemistry", "Physics", "English"]
 
     # 1. Fetch roster
     student_docs_raw = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
@@ -843,8 +913,7 @@ if user_role == "teacher":
 
     # 2. Render Menu safely
     teacher_menu = st.radio(
-        "Teacher Menu", 
-        ["Class Management", "Student Analytics", "Assign Papers", "AI Chat"], 
+        "Teacher Menu",["Class Management", "Student Analytics", "Assign Papers", "AI Chat"], 
         horizontal=True, 
         label_visibility="collapsed"
     )
@@ -859,7 +928,7 @@ if user_role == "teacher":
         with st.form("create_class_form", clear_on_submit=True):
             cc1, cc2, cc3 = st.columns([0.4, 0.3, 0.3])
             with cc1: grade_choice = st.selectbox("Grade", ["Grade 6", "Grade 7", "Grade 8"])
-            with cc2: section_choice = st.selectbox("Section", ["A", "B", "C", "D"])
+            with cc2: section_choice = st.selectbox("Section",["A", "B", "C", "D"])
             with cc3:
                 st.write("")
                 submit_class = st.form_submit_button("Create", use_container_width=True)
@@ -907,11 +976,11 @@ if user_role == "teacher":
                 cdata = c.to_dict()
                 cname = c.id
                 csubj = cdata.get("subjects", [])
-                cstuds = cdata.get("students", [])
+                cstuds = cdata.get("students",[])
                 
                 with st.expander(f"🏫 {cname} • {len(cstuds)} Students • {', '.join(csubj) if csubj else 'No subjects'}"):
                     st.markdown("**Subjects You Teach in This Class**")
-                    new_subjs = []
+                    new_subjs =[]
                     scols = st.columns(len(AVAILABLE_SUBJECTS))
                     for i, subject in enumerate(AVAILABLE_SUBJECTS):
                         with scols[i]:
@@ -986,16 +1055,16 @@ if user_role == "teacher":
                     st.markdown(f"### Report for **{selected_name}**")
 
                     my_classes_raw = list(db.collection("classes").where(filter=firestore.FieldFilter("created_by", "==", user_email)).stream())
-                    tsubjs = []
+                    tsubjs =[]
                     for c in my_classes_raw:
-                        if selected_student in c.to_dict().get("students", []):
-                            tsubjs = c.to_dict().get("subjects", [])
+                        if selected_student in c.to_dict().get("students",[]):
+                            tsubjs = c.to_dict().get("subjects",[])
                             break
 
                     analytics_docs = db.collection("users").document(selected_student).collection("analytics").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(100).stream()
                     
                     recent_w = set()
-                    recent_q = []
+                    recent_q =[]
                     total_score = 0
                     score_count = 0
                     chapter_stats = {}
@@ -1027,7 +1096,7 @@ if user_role == "teacher":
                         chapter_stats[ch_key]["count"] += 1
 
                         wp = data.get("weak_point")
-                        if wp and str(wp).lower() not in ["none", "null", ""]:
+                        if wp and str(wp).lower() not in["none", "null", ""]:
                             ch_display = f"Ch {ch_num}: {ch_name}" if ch_num > 0 else ch_name
                             recent_w.add(f"**{doc_subject} ({ch_display}):** {wp}")
                             
@@ -1082,8 +1151,6 @@ if user_role == "teacher":
             st.error(f"Error loading analytics: {str(e)}")
 
 
-
-
     # ── MENU 3: ASSIGN PAPERS
     elif teacher_menu == "📝 Assign Papers":
         st.subheader("📝 Assignment Creator")
@@ -1092,10 +1159,10 @@ if user_role == "teacher":
         with a_col1:
             assign_title = st.text_input("Assignment Title", placeholder="e.g. Chapter 4 Science Quiz")
             assign_subject = st.selectbox("Subject", ["Math", "Biology", "Chemistry", "Physics", "English"])
-            assign_grade = st.selectbox("Grade", ["Grade 6", "Grade 7", "Grade 8"])
+            assign_grade = st.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"])
             assign_stage = GRADE_TO_STAGE[assign_grade] # Map to Stage for AI accuracy
         with a_col2:
-            assign_difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard", "Mixed"])
+            assign_difficulty = st.selectbox("Difficulty",["Easy", "Medium", "Hard", "Mixed"])
             assign_marks = st.number_input("Total Marks", min_value=10, max_value=100, value=30, step=5)
             assign_due = st.date_input("Due Date")
 
@@ -1106,7 +1173,7 @@ if user_role == "teacher":
         - Plain text math (no LaTeX).
         - Clean numbering, marks like [3].
         - Include '## Mark Scheme' at the end.
-        - Append [PDF_READY] at the end.
+        - Append[PDF_READY] at the end.
         - Do not hallucinate adding school names or any of that. Just use the assignment title as the title of the paper.
         - The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 correlates to grade 7. When it's mentioned 7 in the book name, that means it's grade 6. When it's mentioned 8 in the book name, that means it's grade 7. When it's mentioned 9 in the book name, that means it's grade 8. Follow this new naming scheme.
         """
@@ -1120,7 +1187,7 @@ if user_role == "teacher":
                     query_for_books = f"{assign_subject} {assign_grade}"
                     relevant_books = select_relevant_books(query_for_books, st.session_state.textbook_handles)
                     
-                    paper_contents = []
+                    paper_contents =[]
                     for book in relevant_books:
                         friendly = get_friendly_name(book.display_name)
                         paper_contents.append(types.Part.from_text(text=f"[Curriculum Source: {friendly}]"))
@@ -1146,8 +1213,8 @@ if user_role == "teacher":
                     )
                     
                     gen_paper = safe_response_text(gen_resp).strip()
-                    draft_visual_prompts = re.findall(r'\[(IMAGEGEN|PIECHART):\s*(.*?)\]', gen_paper)
-                    draft_images = []
+                    draft_visual_prompts = re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", gen_paper)
+                    draft_images =[]
                     if draft_visual_prompts:
                         with st.spinner("Drawing diagrams for the paper..."):
                             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -1163,10 +1230,10 @@ if user_role == "teacher":
 
         if st.session_state.get("draft_paper"):
             with st.expander("📝 Preview Paper", expanded=True):
-                display_paper = st.session_state.draft_paper.replace("[PDFREADY]", "").strip()
+                display_paper = st.session_state.draft_paper.replace("[PDF_READY]", "").strip()
                 st.markdown(display_paper)
                 
-                draft_imgs = st.session_state.get("draft_images", [])
+                draft_imgs = st.session_state.get("draft_images",[])
                 if draft_imgs:
                     for img_bytes in draft_imgs:
                         if img_bytes:
@@ -1187,10 +1254,10 @@ if user_role == "teacher":
 
 
             st.divider()
-            push_mode = st.radio("Push to:", ["Entire Class", "Individual Student"], horizontal=True)
+            push_mode = st.radio("Push to:",["Entire Class", "Individual Student"], horizontal=True)
             my_classes_raw = list(db.collection("classes").where(filter=firestore.FieldFilter("created_by", "==", user_email)).stream())
             if push_mode == "Entire Class":
-                class_options = {c.id: c.to_dict().get("students", []) for c in my_classes_raw}
+                class_options = {c.id: c.to_dict().get("students",[]) for c in my_classes_raw}
                 if not class_options: st.warning("You haven't created any classes yet.")
                 else:
                     target_class = st.selectbox("Select Class:", list(class_options.keys()))
@@ -1230,7 +1297,7 @@ else:
                 user_profile["grade"] = class_grade
         else:
             current_grade = user_profile.get("grade", "Grade 6")
-            GRADE_OPTIONS = ["Grade 6", "Grade 7", "Grade 8"]
+            GRADE_OPTIONS =["Grade 6", "Grade 7", "Grade 8"]
             with st.expander("🎓 Set Your Grade", expanded=(current_grade not in GRADE_OPTIONS)):
                 selected_grade = st.selectbox(
                     "Which grade are you in?", 
@@ -1400,8 +1467,7 @@ Chapter 7 • Testing your skills
 
    ### RULE 7: Analytics for students:
    If the user asks a question about a concept or attempts to answer a question, evaluate their understanding. 
-At the VERY END of your response, output a hidden JSON block EXACTLY like this (this is an example):
-[ANALYTICS: {
+At the VERY END of your response, output a hidden JSON block EXACTLY like this (this is an example):[ANALYTICS: {
   "subject": "Math", 
   "grade": "Grade 7",
   "chapter_number": 4,
@@ -1441,7 +1507,7 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                         st.caption(f"From: {a_data.get('assigned_by', 'Your Teacher')}  ·  Due: {a_data.get('due_date', 'No due date')}")
                     with col_b:
                         if st.button("Open", key=f"open_assign_{a_id}", type="primary"):
-                            assign_msg = {"role": "assistant", "content": a_data.get("content", ""), "is_downloadable": True, "images": [], "is_assignment": True}
+                            assign_msg = {"role": "assistant", "content": a_data.get("content", ""), "is_downloadable": True, "images":[], "is_assignment": True}
                             st.session_state.messages.append(assign_msg)
                             db.collection("users").document(auth_object.email).collection("assignments").document(a_id).update({"status": "opened"})
                             save_chat_history()
@@ -1467,36 +1533,40 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
             if message.get("user_attachment_bytes"):
                 mime = message.get("user_attachment_mime", "")
                 name = message.get("user_attachment_name", "File")
-                if "image" in mime: st.image(message["user_attachment_bytes"], width=320)
-                elif "pdf" in mime: st.caption(f"📄 *Attached PDF Document: {name}*")
-                elif "text" in mime or name.endswith(".txt"): st.caption(f"📝 *Attached Text Document: {name}*")
+                if "image" in mime: 
+                    # Fixed rendering size to fix blurriness issue
+                    st.image(message["user_attachment_bytes"], use_container_width=True)
+                elif "pdf" in mime: 
+                    st.caption(f"📄 *Attached PDF Document: {name}*")
+                elif "text" in mime or name.endswith(".txt"): 
+                    st.caption(f"📝 *Attached Text Document: {name}*")
 
-                if message["role"] == "assistant" and message.get("isdownloadable"):
-                    try:
-                        imgs = message.get("images") or []
-                        
-                        if not imgs and message.get("dbimages"):
-                            imgs = []
-                            for b64str in message.get("dbimages", []):
-                                if b64str:
-                                    try:
-                                        imgs.append(base64.b64decode(b64str))
-                                    except Exception:
-                                        pass
-                        
-                        pdf_buffer = create_pdf(
-                            message.get("content") or "",
-                            images=imgs if imgs else None
-                        )
-                        st.download_button(
-                            label="📄 Download Question Paper as PDF",
-                            data=pdf_buffer,
-                            file_name=f"HelixQuestionPaper{idx}.pdf",
-                            mime="application/pdf",
-                            key=f"download_{st.session_state.current_thread_id}_{idx}"
-                        )
-                    except Exception:
-                        pass
+            if message["role"] == "assistant" and message.get("is_downloadable"):
+                try:
+                    imgs = message.get("images") or[]
+                    
+                    if not imgs and message.get("db_images"):
+                        imgs =[]
+                        for b64str in message.get("db_images",[]):
+                            if b64str:
+                                try:
+                                    imgs.append(base64.b64decode(b64str))
+                                except Exception:
+                                    pass
+                    
+                    pdf_buffer = create_pdf(
+                        message.get("content") or "",
+                        images=imgs if imgs else None
+                    )
+                    st.download_button(
+                        label="📄 Download Question Paper as PDF",
+                        data=pdf_buffer,
+                        file_name=f"HelixQuestionPaper_{idx}.pdf",
+                        mime="application/pdf",
+                        key=f"download_{st.session_state.current_thread_id}_{idx}"
+                    )
+                except Exception:
+                    pass
 
 
     chat_input_data = st.chat_input("Ask Helix... (Click the paperclip to upload a file!)", accept_file=True, file_type=["jpg", "jpeg", "png", "webp", "avif", "svg", "pdf", "txt"])
@@ -1523,7 +1593,8 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
         with st.chat_message("user"):
             st.markdown(prompt)
             if file_bytes:
-                if "image" in (file_mime or ""): st.image(file_bytes, width=320)
+                # Fixed rendering size inside chat preview
+                if "image" in (file_mime or ""): st.image(file_bytes, use_container_width=True)
                 elif "pdf" in (file_mime or ""): st.caption(f"📄 *Attached: {file_name}*")
                 elif "text/plain" in (file_mime or "") or (file_name or "").endswith(".txt"): st.caption(f"📝 *Attached: {file_name}*")
 
@@ -1541,21 +1612,17 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
 
                 thinking_placeholder.markdown("""<div class="thinking-container"><span class="thinking-text">Thinking</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
 
-                current_prompt_parts = []
+                current_prompt_parts =[]
                 temp_pdf_path = None
 
                 if file_bytes:
-                    # 1. Reliably detect the MIME type
-                    mime = file_mime or guess_mime(filename)
+                    mime = file_mime or guess_mime(file_name)
 
-                    # 2. Handle Images (JPG, PNG, WEBP, AVIF, SVG)
                     if is_image_mime(mime):
-                        # Pass directly as bytes, no need to upload to Google Files API
                         current_prompt_parts.append(
                             types.Part.from_bytes(data=file_bytes, mime_type=mime)
                         )
 
-                    # 3. Handle PDFs (Upload to Google Files API to handle large documents)
                     elif "pdf" in mime:
                         temp_pdf_path = f"temp_user_upload_{int(time.time())}.pdf"
                         with open(temp_pdf_path, "wb") as f:
@@ -1563,7 +1630,6 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
 
                         user_uploaded_pdf = client.files.upload_file(temp_pdf_path)
 
-                        # Wait for file to fully process (increased sleep to prevent 403)
                         while user_uploaded_pdf.state.name == "PROCESSING":
                             time.sleep(2)
                             user_uploaded_pdf = client.files.get(name=user_uploaded_pdf.name)
@@ -1579,18 +1645,16 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                             )
                         )
 
-                    # 4. Handle Text files
-                    elif "text" in mime or filename.lower().endswith(".txt"):
+                    elif "text" in mime or (file_name and file_name.lower().endswith(".txt")):
                         raw_text = file_bytes.decode("utf-8", errors="ignore")
                         current_prompt_parts.append(
                             types.Part.from_text(
-                                text=f"--- Attached Text File: {filename} ---\n{raw_text}\n--- End of File ---"
+                                text=f"--- Attached Text File: {file_name} ---\n{raw_text}\n--- End of File ---"
                             )
                         )
 
-                    # 5. Unsupported formats
                     else:
-                        st.warning(f"Unsupported file type: {mime} ({filename})")
+                        st.warning(f"Unsupported file type: {mime} ({file_name})")
                         
                 for book in relevant_books:
                     friendly = get_friendly_name(book.display_name)
@@ -1605,8 +1669,6 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                         )
                     )
 
-
-                # Finally, attach the user's prompt
                 current_prompt_parts.append(
                     types.Part.from_text(
                         text=(
@@ -1621,7 +1683,7 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
 
 
 
-                history_contents = []
+                history_contents =[]
                 text_msgs = [m for m in st.session_state.messages[:-1] if not m.get("is_greeting")]
                 for msg in text_msgs[-7:]:
                     role = "user" if msg["role"] == "user" else "model"
@@ -1660,51 +1722,15 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                 thinking_placeholder.empty()
 
                 visual_prompts = re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", bot_text)
-                generated_images = []
+                generated_images =[]
 
                 if visual_prompts:
                     img_thinking = st.empty()
                     img_thinking.markdown("""<div class="thinking-container"><span class="thinking-text">🖌️ Processing diagrams & charts...</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
-                    def process_visual_wrapper(vp):
-                        try:
-                            v_type, v_data = vp
-                            if v_type == "IMAGE_GEN":
-                                try:
-                                    img_resp = client.models.generate_content(
-                                        model="gemini-3.1-flash-image-preview",
-                                        contents=[v_data],
-                                        config=types.GenerateContentConfig(
-                                            response_modalities=["TEXT", "IMAGE"],
-                                            image_config=types.ImageConfig(aspect_ratio="16:9", image_size="2K")
-                                        ),
-                                    )
-                                    for part in (img_resp.parts or []):
-                                        if getattr(part, "inline_data", None):
-                                            return part.inline_data.data
-                                except: return None
-                            elif v_type == "PIE_CHART":
-                                try:
-                                    labels, sizes = [], []
-                                    for item in str(v_data).split(","):
-                                        if ":" in item:
-                                            k, v = item.split(":", 1)
-                                            labels.append(k.strip())
-                                            sizes.append(float(re.sub(r"[^\d\.]", "", v)))
-                                    if not labels or not sizes or len(labels) != len(sizes): return None
-                                    fig = Figure(figsize=(5, 5), dpi=200)
-                                    FigureCanvas(fig)
-                                    ax = fig.add_subplot(111)
-                                    theme_colors = ["#00d4ff", "#fc8404", "#2ecc71", "#9b59b6", "#f1c40f", "#e74c3c"]
-                                    ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=140, colors=theme_colors[:len(labels)], textprops={"color": "black", "fontsize": 9})
-                                    ax.axis("equal")
-                                    buf = BytesIO()
-                                    fig.savefig(buf, format="png", bbox_inches="tight", transparent=True)
-                                    return buf.getvalue()
-                                except: return None
-                        except: return None
-
+                    
                     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                         generated_images = list(executor.map(process_visual_wrapper, visual_prompts))
+                    
                     img_thinking.empty()
                     for img in generated_images:
                         if img is None: bot_text += "\n\n⚠️ *Helix tried to draw a diagram here, but the image generator is currently overloaded. Please try again later.*"
@@ -1736,4 +1762,3 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                 try:
                     if "temp_pdf_path" in locals() and temp_pdf_path and os.path.exists(temp_pdf_path): os.remove(temp_pdf_path)
                 except Exception: pass
-
