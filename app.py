@@ -1227,7 +1227,7 @@ if user_role == "teacher":
                     paper_contents.append(types.Part.from_text(text=gen_prompt))
 
                     gen_resp = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-2.5-pro",
                         contents=paper_contents,
                         config=types.GenerateContentConfig(
                             system_instruction=PAPER_SYSTEM, 
