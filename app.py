@@ -122,15 +122,26 @@ def get_user_profile(email):
     doc = doc_ref.get()
     if doc.exists:
         profile = doc.to_dict()
+        needs_update = False
+        
         if not profile.get("display_name") and is_authenticated:
             google_name = getattr(auth_object, "name", None) or email.split("@")[0]
-            doc_ref.update({"display_name": google_name})
             profile["display_name"] = google_name
+            needs_update = True
+            
+        # Bug Fix: Auto-migrate stuck "undefined" roles to "student"
+        if profile.get("role") == "undefined":
+            profile["role"] = "student"
+            needs_update = True
+            
+        if needs_update:
+            doc_ref.update(profile)
+            
         return profile
     else:
         google_name = getattr(auth_object, "name", None) or email.split("@")[0] if is_authenticated else email.split("@")[0]
         default_profile = {
-            "role": "undefined",
+            "role": "student",  # Bug Fix: New users are "student" by default now
             "teacher_id": None,
             "display_name": google_name,
             "grade": "Grade 6",
@@ -167,7 +178,7 @@ user_role = "guest"
 if is_authenticated:
     user_email = auth_object.email
     user_profile = get_user_profile(user_email)
-    user_role = user_profile.get("role", "undefined")
+    user_role = user_profile.get("role", "student")
 
 # -----------------------------
 # THREAD HELPERS
@@ -1294,7 +1305,7 @@ if user_role == "teacher":
                     
                     gen_paper = safe_response_text(gen_resp).strip()
                     draft_visual_prompts = re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", gen_paper)
-                    draft_images =[]
+                    draft_images = []
                     draft_models =[]
                     
                     if draft_visual_prompts:
@@ -1785,7 +1796,7 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                     role = "user" if msg["role"] == "user" else "model"
                     history_contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.get("content") or "")]))
 
-                full_contents = history_contents +[current_content]
+                full_contents = history_contents + [current_content]
 
                 text_response = client.models.generate_content(
                     model="gemini-3.1-flash-lite-preview",
