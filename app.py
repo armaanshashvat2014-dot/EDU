@@ -53,7 +53,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-TEACHER_VERIFICATION_CODE = st.secrets.get("TEACHER_VERIFICATION_CODE", "7nI9sL0")
+# MULTI-TENANT SCHOOL CODES SETUP
+# Strictly reads from st.secrets. No hardcoded fallbacks!
+if "SCHOOL_CODES" in st.secrets:
+    SCHOOL_CODES = dict(st.secrets["SCHOOL_CODES"])
+else:
+    SCHOOL_CODES = {}
 
 # -----------------------------
 # 1.5) GRADE <-> STAGE MAPPING
@@ -128,13 +133,13 @@ def get_user_profile(email):
             "role": "undefined",
             "teacher_id": None,
             "display_name": google_name,
-            "grade": "Grade 6" 
+            "grade": "Grade 6",
+            "school": None
         }
-        
         doc_ref.set(default_profile)
         return default_profile
 
-def create_global_class(class_id, teacher_email, grade, section):
+def create_global_class(class_id, teacher_email, grade, section, school_name):
     clean_id = class_id.strip().upper()
     if not clean_id or not db: return False, "Database error."
     class_ref = db.collection("classes").document(clean_id)
@@ -149,6 +154,7 @@ def create_global_class(class_id, teacher_email, grade, section):
             "created_at": time.time(),
             "grade": grade,
             "section": section,
+            "school": school_name,
             "students":[],
             "subjects":[]
         })
@@ -622,6 +628,18 @@ def render_admin_panel():
     with st.sidebar:
         st.markdown("<b style='color:#ff4d6d'>ADMIN NAVIGATION</b>", unsafe_allow_html=True)
         admin_page = st.radio("",["📊 Dashboard", "🎓 Students", "👩‍🏫 Teachers", "🏫 Classes", "🧪 AI Debug Lab"], label_visibility="collapsed")
+        
+        st.markdown("---")
+        st.markdown("<b style='color:#ff4d6d'>🏫 SCHOOL FILTER</b>", unsafe_allow_html=True)
+        
+        # Build unique school list dynamically
+        all_schools_query = db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()
+        db_schools = set([u.to_dict().get("school") for u in all_schools_query if u.to_dict().get("school")])
+        config_schools = set(SCHOOL_CODES.values())
+        all_schools = sorted(list(db_schools.union(config_schools)))
+        
+        admin_school_filter = st.selectbox("Filter Data By School", ["All Schools"] + all_schools, label_visibility="collapsed")
+
         st.markdown("---")
         if st.button("🚪 Exit Admin Mode", use_container_width=True):
             st.session_state["admin_authenticated"] = False
@@ -630,12 +648,19 @@ def render_admin_panel():
 
     # --- DASHBOARD ---
     if admin_page == "📊 Dashboard":
-        st.markdown('<div class="section-header">📊 System Overview</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header">📊 System Overview ({admin_school_filter})</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
         try:
-            students_count = len(list(db.collection("users").where(filter=firestore.FieldFilter("role", "==", "student")).stream()))
-            teachers_count = len(list(db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()))
-            classes_count = len(list(db.collection("classes").stream()))
+            if admin_school_filter == "All Schools":
+                students_count = len(list(db.collection("users").where(filter=firestore.FieldFilter("role", "==", "student")).stream()))
+                teachers_count = len(list(db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()))
+                classes_count = len(list(db.collection("classes").stream()))
+            else:
+                school_users = list(db.collection("users").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream())
+                students_count = sum(1 for u in school_users if u.to_dict().get("role") == "student")
+                teachers_count = sum(1 for u in school_users if u.to_dict().get("role") == "teacher")
+                classes_count = len(list(db.collection("classes").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()))
+
             c1.markdown(f'<div class="stat-card"><div class="stat-number">{students_count}</div><div class="stat-label">Students</div></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="stat-card"><div class="stat-number">{teachers_count}</div><div class="stat-label">Teachers</div></div>', unsafe_allow_html=True)
             c3.markdown(f'<div class="stat-card"><div class="stat-number">{classes_count}</div><div class="stat-label">Classes</div></div>', unsafe_allow_html=True)
@@ -643,14 +668,19 @@ def render_admin_panel():
 
     # --- STUDENTS ---
     elif admin_page == "🎓 Students":
-        st.markdown('<div class="section-header">🎓 Manage Students</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header">🎓 Manage Students ({admin_school_filter})</div>', unsafe_allow_html=True)
         try:
-            students =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "student")).stream()]
-            if students:
-                rows = "".join(f"<tr><td>{s.get('display_name','—')}</td><td>{s.get('id','—')}</td><td>{s.get('grade','—')}</td><td><code>{s['id']}</code></td></tr>" for s in students)
-                st.markdown(f'<table class="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Grade</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            if admin_school_filter == "All Schools":
+                students =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "student")).stream()]
             else:
-                st.info("No students registered.")
+                school_users = db.collection("users").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()
+                students =[{"id": d.id, **d.to_dict()} for d in school_users if d.to_dict().get("role") == "student"]
+            
+            if students:
+                rows = "".join(f"<tr><td>{s.get('display_name','—')}</td><td>{s.get('school','—')}</td><td>{s.get('grade','—')}</td><td><code>{s['id']}</code></td></tr>" for s in students)
+                st.markdown(f'<table class="admin-table"><thead><tr><th>Name</th><th>School</th><th>Grade</th><th>Doc ID (Email)</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            else:
+                st.info("No students registered for this filter.")
         except Exception as e: st.error(str(e))
         
         st.markdown('<div class="section-header">🗑️ Delete Student</div>', unsafe_allow_html=True)
@@ -669,14 +699,19 @@ def render_admin_panel():
 
     # --- TEACHERS ---
     elif admin_page == "👩‍🏫 Teachers":
-        st.markdown('<div class="section-header">👩‍🏫 Manage Teachers</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header">👩‍🏫 Manage Teachers ({admin_school_filter})</div>', unsafe_allow_html=True)
         try:
-            teachers =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()]
-            if teachers:
-                rows = "".join(f"<tr><td>{t.get('display_name','—')}</td><td>{t.get('id','—')}</td><td><code>{t['id']}</code></td></tr>" for t in teachers)
-                st.markdown(f'<table class="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            if admin_school_filter == "All Schools":
+                teachers =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()]
             else:
-                st.info("No teachers registered.")
+                school_users = db.collection("users").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()
+                teachers =[{"id": d.id, **d.to_dict()} for d in school_users if d.to_dict().get("role") == "teacher"]
+
+            if teachers:
+                rows = "".join(f"<tr><td>{t.get('display_name','—')}</td><td>{t.get('school','—')}</td><td><code>{t['id']}</code></td></tr>" for t in teachers)
+                st.markdown(f'<table class="admin-table"><thead><tr><th>Name</th><th>School</th><th>Doc ID (Email)</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            else:
+                st.info("No teachers registered for this filter.")
         except Exception as e: st.error(str(e))
         del_t = st.text_input("Teacher Doc ID to delete")
         if st.button("Delete Teacher", type="primary") and del_t:
@@ -685,14 +720,18 @@ def render_admin_panel():
 
     # --- CLASSES ---
     elif admin_page == "🏫 Classes":
-        st.markdown('<div class="section-header">🏫 Manage Classes</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header">🏫 Manage Classes ({admin_school_filter})</div>', unsafe_allow_html=True)
         try:
-            classes =[{"id": d.id, **d.to_dict()} for d in db.collection("classes").stream()]
-            if classes:
-                rows = "".join(f"<tr><td>{c.get('name', c['id'])}</td><td>{c.get('grade','—')}</td><td><code>{c['id']}</code></td></tr>" for c in classes)
-                st.markdown(f'<table class="admin-table"><thead><tr><th>Name/ID</th><th>Grade</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            if admin_school_filter == "All Schools":
+                classes =[{"id": d.id, **d.to_dict()} for d in db.collection("classes").stream()]
             else:
-                st.info("No classes created.")
+                classes =[{"id": d.id, **d.to_dict()} for d in db.collection("classes").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()]
+
+            if classes:
+                rows = "".join(f"<tr><td>{c.get('name', c['id'])}</td><td>{c.get('school','—')}</td><td>{c.get('grade','—')}</td><td><code>{c['id']}</code></td></tr>" for c in classes)
+                st.markdown(f'<table class="admin-table"><thead><tr><th>Name/ID</th><th>School</th><th>Grade</th><th>Doc ID</th></tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+            else:
+                st.info("No classes created for this filter.")
         except Exception as e: st.error(str(e))
         del_c = st.text_input("Class Doc ID to delete")
         if st.button("Delete Class", type="primary") and del_c:
@@ -766,9 +805,13 @@ with st.sidebar:
                     st.caption("Enter your school's verification code to unlock the Teacher Dashboard.")
                     code_input = st.text_input("Teacher Code", type="password")
                     if st.button("Verify Code"):
-                        if code_input == TEACHER_VERIFICATION_CODE:
-                            db.collection("users").document(user_email).update({"role": "teacher"})
-                            st.success("Verified! Refreshing app...")
+                        if code_input in SCHOOL_CODES:
+                            school_name = SCHOOL_CODES[code_input]
+                            db.collection("users").document(user_email).update({
+                                "role": "teacher", 
+                                "school": school_name
+                            })
+                            st.success(f"Verified! Welcome to {school_name}. Refreshing app...")
                             time.sleep(1)
                             st.rerun()
                         else:
@@ -933,9 +976,16 @@ if user_role == "teacher":
     
     AVAILABLE_SUBJECTS =["Math", "Biology", "Chemistry", "Physics", "English"]
 
-    # 1. Fetch roster
-    student_docs_raw = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
-    roster = list(student_docs_raw)
+    # Retrieve Teacher's School for Roster filtering
+    user_school = user_profile.get("school")
+
+    if user_school:
+        school_users = list(db.collection("users").where(filter=firestore.FieldFilter("school", "==", user_school)).stream())
+        roster =[u for u in school_users if u.to_dict().get("role") == "student"]
+    else:
+        # Fallback for old teacher accounts without a school registered
+        student_docs_raw = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
+        roster = list(student_docs_raw)
 
     # 2. Render Menu safely
     teacher_menu = st.radio(
@@ -962,7 +1012,7 @@ if user_role == "teacher":
             if submit_class:
                 grade_num = grade_choice.split()[-1]
                 class_id = f"{grade_num}{section_choice}".upper()
-                success, msg = create_global_class(class_id, user_email, grade_choice, section_choice)
+                success, msg = create_global_class(class_id, user_email, grade_choice, section_choice, user_school)
                 if success:
                     st.success(msg)
                     time.sleep(1)
@@ -987,7 +1037,11 @@ if user_role == "teacher":
                     
                 if submit_stud and new_email:
                     cln_email = new_email.strip().lower()
-                    db.collection("users").document(cln_email).set({"role": "student", "teacher_id": user_email}, merge=True)
+                    db.collection("users").document(cln_email).set({
+                        "role": "student", 
+                        "teacher_id": user_email,
+                        "school": user_school
+                    }, merge=True)
                     db.collection("classes").document(sel_class).update({"students": firestore.ArrayUnion([cln_email])})
                     st.success(f"Added {cln_email} to {sel_class}!")
                     time.sleep(1)
@@ -1240,7 +1294,7 @@ if user_role == "teacher":
                     
                     gen_paper = safe_response_text(gen_resp).strip()
                     draft_visual_prompts = re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", gen_paper)
-                    draft_images = []
+                    draft_images =[]
                     draft_models =[]
                     
                     if draft_visual_prompts:
@@ -1731,7 +1785,7 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                     role = "user" if msg["role"] == "user" else "model"
                     history_contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.get("content") or "")]))
 
-                full_contents = history_contents + [current_content]
+                full_contents = history_contents +[current_content]
 
                 text_response = client.models.generate_content(
                     model="gemini-3.1-flash-lite-preview",
