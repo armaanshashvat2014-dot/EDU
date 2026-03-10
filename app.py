@@ -1428,7 +1428,7 @@ Chapter 7 • Testing your skills
                     paper_contents.append(types.Part.from_text(text=gen_prompt))
 
                     gen_resp = client.models.generate_content(
-                        model="gemini-2.5-pro",
+                        model="gemini-3.1-flash-lite-preview",
                         contents=paper_contents,
                         config=types.GenerateContentConfig(
                             system_instruction=PAPER_SYSTEM, 
@@ -1937,7 +1937,7 @@ The books are labeled as Stage 7, but Stage 7 correlates to grade 6. Stage 8 cor
                 full_contents = history_contents + [current_content]
 
                 text_response = client.models.generate_content(
-                    model="gemini-2.5-pro",
+                    model="gemini-3.1-flash-lite-preview",
                     contents=full_contents,
                     config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.3, tools=[{"google_search": {}}]),
                 )
