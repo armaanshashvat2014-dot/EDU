@@ -1290,6 +1290,140 @@ if user_role == "teacher":
                         f"Difficulty: {assign_difficulty}. Total marks: {assign_marks}. \n"
                         f"Instructions: {assign_extra if assign_extra else 'None'}. \n"
                         f"Do NOT invent topics outside this syllabus. Append [PDF_READY] at the end."
+                        """QUESTION PAPERS (CRITICAL FORMATTING)
+    - SUBJECT RELEVANCE: NEVER put Science diagrams or questions in a Math paper, and vice versa!
+    - NO LATEX MATH: DO NOT use LaTeX for math formatting. NEVER use backslashes (\\) or commands like \\frac, \\times, \\div.
+    - PLAIN TEXT MATH ONLY: Use standard characters (/, x, *, ÷, ^,-,+,=).
+    - Tables: ALWAYS use standard Markdown tables. Do NOT use IMAGE_GEN for tables.
+    - Visuals: Use IMAGE_GEN for diagrams, PIE_CHART for pie charts. When using IMAGE_GEN, ask for labels unless, let's say, you are making a question paper and your goal is to ask the student to label the thing, mention to leave empty squares for labelling as a question.
+    - NUMBERING: Clean numbering 1., 2., 3. and always atleast 2-3 sub-questions (a), (b), (c).
+    - MARKS: Put marks at end of the SAME LINE like "... [3]".
+    - When you are asked to create a question paper, the assignment title must be the TITLE of the paper. You should not use any other made-up name for the title. Do not hallucinate while creating the name of the paper. Do not mention the SCHOOL name either. Just mention the grade and the chapter this test is made for .
+    - PDF TRIGGER: If, and ONLY IF, you generated a full formal question paper, append [PDF_READY] at the very end.
+    - SYLLABUS STRICTNESS: When generating a question paper, every single question MUST be sourced directly from the attached textbook context. If the user asks for "Chapter n", find Chapter n in the text and only use topics from that chapter.
+    - ENGLISH PAPERS: There are 2 papers, formal and informal. Make both if not specified. There must be at least 15 questions per paper, and a paper is 40M for grade 7 and below, 50m for grade 8. Each question must have at least 2 or more bits. The grammar must be related to the text. Each reading comprehension text must be 450+ words. Also add things like poem comprehension, and more if the syllabus includes it (200 words max). It should be detailed and big, kinda hard.
+
+    ### RULE 4: English, Grade 8/Stage 9:
+    I could not find the book for stage 9/grade 8, so here is the syllabus:
+    Chapter 1 • Writing to explore and reflect
+1.1 What is travel writing?
+
+1.2 Selecting and noting key information in travel texts
+
+1.3 Comparing tone and register in travel texts
+
+1.4 Responding to travel writing
+
+1.5 Understanding grammatical choices in travel writing
+
+1.6 Varying sentences for effect
+
+1.7 Boost your vocabulary
+
+1.8 Creating a travel account
+
+Chapter 2 • Writing to inform and explain
+2.1 Matching informative texts to audience and purpose
+
+2.2 Using formal and informal language in information texts
+
+2.3 Comparing information texts
+
+2.4 Using discussion to prepare for a written assignment
+
+2.5 Planning information texts to suit different audiences
+
+2.6 Shaping paragraphs to suit audience and purpose
+
+2.7 Crafting sentences for a range of effects
+
+2.8 Making explanations precise and concise
+
+2.9 Writing encyclopedia entries
+
+Chapter 3 • Writing to argue and persuade
+3.1 Reviewing persuasive techniques
+
+3.2 Commenting on use of language to persuade
+
+3.3 Exploring layers of persuasive language
+
+3.4 Responding to the use of persuasive language
+
+3.5 Adapting grammar choices to create effects in argument writing
+
+3.6 Organising a whole argument effectively
+
+3.7 Organising an argument within each paragraph
+
+3.8 Presenting and responding to a question
+
+3.9 Producing an argumentative essay
+
+Chapter 4 • Descriptive writing
+4.1 Analysing how atmospheres are created
+
+4.2 Developing analysis of a description
+
+4.3 Analysing atmospheric descriptions
+
+4.4 Using images to inspire description
+
+4.5 Using language to develop an atmosphere
+
+4.6 Sustaining a cohesive atmosphere
+
+4.7 Creating atmosphere through punctuation
+
+4.8 Using structural devices to build up atmosphere
+
+4.9 Producing a powerful description
+
+Chapter 5 • Narrative writing
+5.1 Understanding story openings
+
+5.2 Exploring setting and atmosphere
+
+5.3 Introducing characters in stories
+
+5.4 Responding to powerful narrative
+
+5.5 Pitching a story
+
+5.6 Creating narrative suspense and climax
+
+5.7 Creating character
+
+5.8 Using tenses in narrative
+
+5.9 Using pronouns and sentence order for effect
+
+5.10 Creating a thriller
+
+Chapter 6 • Writing to analyse and compare
+6.1 Analysing implicit meaning in non-fiction texts
+
+6.2 Analysing how a play's key elements create different effects
+
+6.3 Using discussion skills to analyse carefully
+
+6.4 Comparing effectively through punctuation and grammar
+
+6.5 Analysing two texts
+
+Chapter 7 • Testing your skills
+7.1 Reading and writing questions on non-fiction texts
+
+7.2 Reading and writing questions on fiction texts
+
+7.3 Assessing your progress: non-fiction reading and writing
+
+7.4 Assessing your progress: fiction reading and writing
+
+    ### RULE 5: VISUAL SYNTAX (STRICT)
+    - For diagrams: IMAGE_GEN:[Detailed description of the image, educational, white background]
+    - For pie charts: PIE_CHART:[Label1:Value1, Label2:Value2]
+"""
                     )
                     paper_contents.append(types.Part.from_text(text=gen_prompt))
 
