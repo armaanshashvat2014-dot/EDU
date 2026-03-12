@@ -590,26 +590,54 @@ def is_image_mime(m: str) -> bool: return (m or "").lower().startswith("image/")
 
 @st.cache_resource(show_spinner=False)
 def upload_textbooks():
-    active_files = {"sci":[], "math":[], "eng":[]}
+    active_files = {"sci": [], "math": [], "eng":[]}
     pdf_map = {p.name.lower(): p for p in Path.cwd().rglob("*.pdf")}
-    existing = {f.display_name.lower(): f for f in client.files.list() if f.display_name}
     
-    with st.chat_message("assistant"): st.markdown("""<div class="thinking-container"><span class="thinking-text">📚 Scanning Books...</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
-    for t in["cie_9_wb_sci.pdf", "cie_9_sb_math.pdf", "cie_8_sb_math.pdf", "cie_7_sb_math.pdf", "cie_8_wb_sci.pdf"]:
+    # Fetch existing files from Google's server
+    try:
+        existing = {f.display_name.lower(): f for f in client.files.list() if f.display_name}
+    except Exception:
+        existing = {}
+    
+    target_files =["cie_9_wb_sci.pdf", "cie_9_sb_math.pdf", "cie_8_sb_math.pdf", "cie_7_sb_math.pdf", "cie_8_wb_sci.pdf"]
+    
+    msg_placeholder = st.empty()
+    with msg_placeholder.chat_message("assistant"): 
+        st.markdown("""<div class="thinking-container"><span class="thinking-text">📚 Preparing Textbooks (Fast Sync)...</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
+
+    def process_single_book(t):
+        # 1. Check if already uploaded and active
         if t in existing and existing[t].state.name == "ACTIVE":
-            if "sci" in t: active_files["sci"].append(existing[t])
-            elif "math" in t: active_files["math"].append(existing[t])
-            elif "eng" in t: active_files["eng"].append(existing[t])
-            continue
+            return t, existing[t]
+        
+        # 2. If not, upload and wait (with a 90-second timeout safeguard)
         if t in pdf_map:
             try:
                 up = client.files.upload(file=str(pdf_map[t]), config={"mime_type": "application/pdf", "display_name": pdf_map[t].name})
-                while up.state.name == "PROCESSING": time.sleep(2); up = client.files.get(name=up.name)
+                
+                timeout = time.time() + 90  # Maximum 90 seconds wait per file
+                while up.state.name == "PROCESSING" and time.time() < timeout:
+                    time.sleep(3)
+                    up = client.files.get(name=up.name)
+                
                 if up.state.name == "ACTIVE":
-                    if "sci" in t: active_files["sci"].append(up)
-                    elif "math" in t: active_files["math"].append(up)
-                    elif "eng" in t: active_files["eng"].append(up)
-            except Exception: pass
+                    return t, up
+            except Exception as e:
+                print(f"Failed to process {t}: {e}")
+        return t, None
+
+    # Use multithreading to upload and process ALL books at the exact same time
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(process_single_book, target_files))
+
+    # Sort the successful uploads into their subjects
+    for t, file_obj in results:
+        if file_obj:
+            if "sci" in t: active_files["sci"].append(file_obj)
+            elif "math" in t: active_files["math"].append(file_obj)
+            elif "eng" in t: active_files["eng"].append(file_obj)
+
+    msg_placeholder.empty()
     return active_files
 
 if is_authenticated and "textbook_handles" not in st.session_state:
