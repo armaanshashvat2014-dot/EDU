@@ -95,8 +95,8 @@ IMPORTANT: ALWAYS check the book when creating questions to ensure syllabus alig
 
 ### RULE 5: VISUAL SYNTAX (STRICT)
 - For diagrams: IMAGE_GEN:[Detailed description of the image, educational, white background]
-- For pie charts: PIE_CHART:[Label1:Value1, Label2:Value2]
-
+- For pie charts: PIE_CHART:[Label1:Value1, Label2:Value2] 
+- When making graphs for rotation, mirroring, symmetry, etc, make sure you mention not to keep the correct answer in the image, like: IMAGE_GEN:[A triangle ABC on a grid with a vertical mirror line to the right, no mirrored triangle] not like IMAGE_GEN:[A triangle ABC on a grid with a vertical mirror line to the right].
 ### RULE 6: MARK SCHEME
 - Put "## Mark Scheme" at the very bottom. No citations inside mark scheme.
 
