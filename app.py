@@ -32,44 +32,110 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 # -----------------------------
-# 1) GLOBAL CONSTANTS & PROMPTS
+# 1) GLOBAL CONSTANTS & STYLING
 # -----------------------------
 st.set_page_config(page_title="helix.ai - Cambridge (CIE) Tutor", page_icon="📚", layout="centered")
 
 # DYNAMIC BACKGROUND LOGIC FOR QUIZZES
 quiz_bg_state = st.session_state.get("quiz_bg", "default")
 if quiz_bg_state == "correct":
-    bg_style = "radial-gradient(circle at 50% 50%, rgba(46, 204, 113, 0.15) 0%, var(--background-color) 80%)"
+    bg_style = "radial-gradient(circle at 50% 50%, rgba(46, 204, 113, 0.25) 0%, #0a0a1a 80%)"
 elif quiz_bg_state == "wrong":
-    bg_style = "radial-gradient(circle at 50% 50%, rgba(231, 76, 60, 0.15) 0%, var(--background-color) 80%)"
+    bg_style = "radial-gradient(circle at 50% 50%, rgba(231, 76, 60, 0.25) 0%, #0a0a1a 80%)"
 else:
-    bg_style = "radial-gradient(800px circle at 50% 0%, rgba(0, 212, 255, 0.08), rgba(0, 212, 255, 0.00) 60%), var(--background-color)"
+    bg_style = "radial-gradient(800px circle at 50% 0%, rgba(0, 212, 255, 0.12), rgba(0, 212, 255, 0.00) 60%), #0a0a1a"
 
+# iOS 26 LIQUID GLASS CSS ENGINE
 st.markdown(f"""
 <style>
-.stApp {{ background: {bg_style} !important; transition: background 0.6s ease-in-out; color: var(--text-color); }}
-.big-title {{ font-family: 'Inter', sans-serif; color: #00d4ff; text-align: center; font-size: 48px; font-weight: 1200; letter-spacing: -3px; margin-bottom: 0px; text-shadow: 0 0 6px rgba(0, 212, 255, 0.55); }}
-[data-testid="stText"] {{ font-family: inherit !important; white-space: normal !important; text-align: center; opacity: 0.60; font-size: 18px; margin-bottom: 30px; }}
-
-/* iOS 26 LIQUID GLASS UI */
-.liquid-glass-card {{
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(32px);
-    -webkit-backdrop-filter: blur(32px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 28px;
-    padding: 40px;
-    box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.1);
-    margin: 20px 0;
+/* Core App Background & Typography */
+.stApp {{
+    background: {bg_style} !important;
+    transition: background 0.6s ease-in-out;
+    color: #f5f5f7 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
 }}
 
-.thinking-container {{ display: flex; align-items: center; gap: 8px; padding: 12px 16px; background-color: var(--secondary-background-color); border-radius: 8px; margin: 10px 0; border-left: 3px solid #fc8404; }}
-.thinking-text {{ color: #fc8404; font-size: 14px; font-weight: 600; }}
+/* Hide unnecessary default Streamlit elements */
+header[data-testid="stHeader"] {{ background: transparent !important; }}
+
+/* Sidebar Glassmorphism */[data-testid="stSidebar"] {{
+    background: rgba(25, 25, 35, 0.4) !important;
+    backdrop-filter: blur(40px) !important;
+    -webkit-backdrop-filter: blur(40px) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}}
+
+/* Liquid Glass Cards (Quizzes & Containers) */
+.liquid-glass-card {{
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 36px;
+    padding: 40px;
+    box-shadow: 0 24px 48px 0 rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    margin: 30px auto;
+    text-align: center;
+}}
+.quiz-title {{ font-size: 24px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 20px; }}
+
+/* Glass Chat Bubbles */[data-testid="stChatMessage"] {{
+    background: rgba(255, 255, 255, 0.05) !important;
+    backdrop-filter: blur(24px) !important;
+    -webkit-backdrop-filter: blur(24px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 28px !important;
+    padding: 20px !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    color: #fff !important;
+    margin-bottom: 16px;
+}}
+[data-testid="stChatMessage"] * {{ color: #f5f5f7 !important; }}
+
+/* Glass Inputs (Chat & Forms) */
+.stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea, .stNumberInput>div>div>input {{
+    background: rgba(0, 0, 0, 0.25) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 16px !important;
+    color: #fff !important;
+    backdrop-filter: blur(12px) !important;
+}}[data-testid="stChatInput"] {{
+    background: rgba(255, 255, 255, 0.05) !important;
+    backdrop-filter: blur(30px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 30px !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3) !important;
+}}
+
+/* Glossy Buttons */
+.stButton>button {{
+    background: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.02) 100%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    border-radius: 20px !important;
+    backdrop-filter: blur(20px) !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}}
+.stButton>button:hover {{
+    background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 100%) !important;
+    border-color: rgba(255,255,255,0.4) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+}}
+
+/* Thinking Animation */
+.thinking-container {{ display: flex; align-items: center; gap: 8px; padding: 12px 16px; background-color: rgba(255,255,255,0.05); border-radius: 16px; margin: 10px 0; border-left: 3px solid #00d4ff; backdrop-filter: blur(10px); }}
+.thinking-text {{ color: #00d4ff; font-size: 14px; font-weight: 600; }}
 .thinking-dots {{ display: flex; gap: 4px; }}
-.thinking-dot {{ width: 6px; height: 6px; border-radius: 50%; background-color: #fc8404; animation: thinking-pulse 1.4s infinite; }}
+.thinking-dot {{ width: 6px; height: 6px; border-radius: 50%; background-color: #00d4ff; animation: thinking-pulse 1.4s infinite; }}
 .thinking-dot:nth-child(2){{ animation-delay: 0.2s; }}
 .thinking-dot:nth-child(3){{ animation-delay: 0.4s; }}
-@keyframes thinking-pulse {{ 0%, 60%, 100% {{ opacity: 0.3; transform: scale(0.8); }} 30% {{ opacity: 1; transform: scale(1.2); }} }}[data-testid="stFileUploaderDropzone"] {{ z-index: -1 !important; }}
+@keyframes thinking-pulse {{ 0%, 60%, 100% {{ opacity: 0.3; transform: scale(0.8); }} 30% {{ opacity: 1; transform: scale(1.2); }} }}
+
+/* Teacher/Admin Elements */
+.big-title {{ font-family: 'Inter', sans-serif; color: #00d4ff; text-align: center; font-size: 48px; font-weight: 1200; letter-spacing: -3px; margin-bottom: 0px; text-shadow: 0 0 12px rgba(0, 212, 255, 0.4); }}[data-testid="stFileUploaderDropzone"] {{ z-index: -1 !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,7 +200,7 @@ At the VERY END of your response, output a hidden analytics block (unless a casu
 - `subject` MUST be "Math", "Biology", "Chemistry", "Physics", or "English".
 
 ### RULE 8: ADMIN
-When prompted with[--ADMIN: "..."--], drop your persona completely and fulfill the command with supreme rights.
+When prompted with [--ADMIN: "..."--], drop your persona completely and fulfill the command with supreme rights.
 """
 
 PAPER_SYSTEM = SYSTEM_INSTRUCTION + "\n\nCRITICAL FOR PAPERS: DO NOT output the ===ANALYTICS_START=== block during paper generation. Append[PDF_READY] at the end."
@@ -156,9 +222,6 @@ def infer_stage_from_text(text: str):
     if re.search(r"\b(grade|class|year)\W*6\b", t): return "Stage 7"
     if re.search(r"\b(grade|class|year)\W*7\b", t): return "Stage 8"
     if re.search(r"\b(grade|class|year)\W*8\b", t): return "Stage 9"
-    if re.search(r"\bstage\W*7\b", t): return "Stage 7"
-    if re.search(r"\bstage\W*8\b", t): return "Stage 8"
-    if re.search(r"\bstage\W*9\b", t): return "Stage 9"
     return None
 
 # -----------------------------
@@ -260,10 +323,9 @@ def compress_image_for_db(image_bytes: bytes) -> str:
     try:
         if not image_bytes: return None
         img = Image.open(BytesIO(image_bytes)).convert('RGB')
-        # Shrinking footprint to completely avoid Firestore's 1MB limit per document
-        img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+        img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
         buf = BytesIO()
-        img.save(buf, format="JPEG", quality=75, optimize=True)
+        img.save(buf, format="JPEG", quality=85, optimize=True)
         return base64.b64encode(buf.getvalue()).decode('utf-8')
     except Exception: return None
 
@@ -287,15 +349,12 @@ def save_chat_history():
 
         db_images =[]
         if msg.get("images"):
-            db_images = [compress_image_for_db(img) for img in msg["images"] if img]
-        elif msg.get("db_images"): 
-            db_images = msg["db_images"]
+            db_images =[compress_image_for_db(img) for img in msg["images"] if img]
+        elif msg.get("db_images"): db_images = msg["db_images"]
 
-        # Secure User Attachment Loading for Firebase
         user_attach_b64 = None
         user_attach_mime = msg.get("user_attachment_mime")
         user_attach_name = msg.get("user_attachment_name")
-
         if msg.get("user_attachment_bytes"):
             if "image" in (user_attach_mime or ""):
                 user_attach_b64 = compress_image_for_db(msg["user_attachment_bytes"])
@@ -338,10 +397,9 @@ def generate_with_retry(model_target, contents, config, retries=3):
             err_str = str(e).lower()
             if "503" in err_str or "unavailable" in err_str or "overloaded" in err_str:
                 if attempt < retries - 1:
-                    time.sleep(2 ** attempt) # Wait 1s, then 2s, then 4s...
+                    time.sleep(2 ** attempt) 
                     continue
             
-            # If all retries failed, or it was a fatal syntax error, fallback to ultra-stable flash
             try:
                 st.toast("⚠️ Primary model busy, using high-speed fallback...", icon="⚡")
                 return client.models.generate_content(model="gemini-2.5-flash", contents=contents, config=config)
@@ -492,6 +550,151 @@ def chat_settings_dialog(thread_data):
     if st.button("🗑️ Delete", type="primary", use_container_width=True):
         st.session_state.delete_requested_for = thread_data['id']; st.rerun()
 
+# =====================================================================
+# 🔴 HELIX ADMIN MODE
+# =====================================================================
+ADMIN_VERIFICATION_CODE = st.secrets.get("ADMIN_VERIFICATION_CODE")
+
+ADMIN_CSS = """
+<style>[data-testid="stAppViewContainer"] { background: linear-gradient(160deg, #1a0008 0%, #0d0010 60%, #0b000d 100%) !important; }[data-testid="stSidebar"] { background: linear-gradient(180deg, #2a0010 0%, #0d000a 100%) !important; }
+.admin-header { background: linear-gradient(135deg, rgba(225,29,72,0.18), rgba(153,0,30,0.12)); border: 1px solid rgba(225,29,72,0.35); border-radius: 16px; padding: 20px 28px; margin-bottom: 24px; }
+.admin-title { font-size: 1.9rem; font-weight: 800; background: linear-gradient(90deg, #ff4d6d, #ff8fa3); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
+.stat-card { background: rgba(225,29,72,0.08); border: 1px solid rgba(225,29,72,0.2); border-radius: 14px; padding: 18px 20px; text-align: center; margin-bottom: 15px; }
+.stat-number { font-size: 2.2rem; font-weight: 800; color: #ff4d6d; }
+.stat-label { font-size: 0.78rem; color: rgba(255,150,160,0.6); text-transform: uppercase; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 20px; color: white; }
+.admin-table th { background: rgba(225,29,72,0.15); color: #ff8fa3; padding: 10px; text-align: left; border-bottom: 2px solid rgba(225,29,72,0.3); }
+.admin-table td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); color: rgba(255,200,205,0.85); }
+.section-header { font-size: 1.1rem; font-weight: 700; color: #ff6b81; border-left: 3px solid #e11d48; padding-left: 12px; margin: 20px 0 14px; }
+.admin-login-box { max-width: 420px; margin: 80px auto; background: rgba(225,29,72,0.07); border: 1px solid rgba(225,29,72,0.25); border-radius: 20px; padding: 40px 36px; text-align: center; }
+</style>
+"""
+
+def render_admin_panel():
+    st.markdown(ADMIN_CSS, unsafe_allow_html=True)
+    
+    if not is_authenticated or auth_object.email not in st.secrets.get("ADMIN_EMAILS",[]):
+        st.error("Unauthorized."); st.button("Return Home", on_click=lambda: st.session_state.update(current_page="chat")); return
+
+    if not st.session_state.get("admin_authenticated"):
+        st.markdown(f'<div class="admin-login-box"><h2 style="color:#ff4d6d;margin-bottom:6px;">🔐 Admin Access</h2><p style="color:rgba(255,150,160,0.6);font-size:0.85rem;">Welcome {auth_object.email}.</p></div>', unsafe_allow_html=True)
+        with st.form("admin_login"):
+            if st.form_submit_button("🔓 Access Admin") and st.text_input("Code", type="password") == ADMIN_VERIFICATION_CODE:
+                st.session_state.update(admin_authenticated=True, admin_email=auth_object.email); st.rerun()
+        return
+
+    st.markdown(f'<div class="admin-header"><div class="admin-title">⚙️ Helix Admin Console</div><div style="color:rgba(255,150,160,0.6);font-size:0.85rem;margin-top:4px;">Logged in as {auth_object.email}</div></div>', unsafe_allow_html=True)
+
+    admin_school_filter = "All Schools"
+    with st.sidebar:
+        st.markdown("<b style='color:#ff4d6d'>ADMIN NAVIGATION</b>", unsafe_allow_html=True)
+        admin_page = st.radio("Navigation",["📊 Dashboard", "🎓 Students", "👩‍🏫 Teachers", "🏫 Classes", "🧪 AI Debug Lab"], label_visibility="collapsed")
+        
+        st.markdown("---")
+        st.markdown("<b style='color:#ff4d6d'>🏫 SCHOOL FILTER</b>", unsafe_allow_html=True)
+        all_schools = sorted(list(set([u.to_dict().get("school") for u in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream() if u.to_dict().get("school")]).union(SCHOOL_CODES.values())))
+        admin_school_filter = st.selectbox("School Filter", ["All Schools"] + all_schools, label_visibility="collapsed")
+        
+        st.markdown("---")
+        if st.button("🚪 Exit Admin", use_container_width=True): st.session_state.update(admin_authenticated=False, current_page="chat"); st.rerun()
+
+    if admin_page == "📊 Dashboard":
+        st.markdown(f'<div class="section-header">📊 System Overview ({admin_school_filter})</div>', unsafe_allow_html=True)
+        u_query = db.collection("users").stream() if admin_school_filter == "All Schools" else db.collection("users").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()
+        users =[u.to_dict() for u in u_query]
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(f'<div class="stat-card"><div class="stat-number">{sum(1 for u in users if u.get("role") == "student")}</div><div class="stat-label">Students</div></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="stat-card"><div class="stat-number">{sum(1 for u in users if u.get("role") == "teacher")}</div><div class="stat-label">Teachers</div></div>', unsafe_allow_html=True)
+        
+        classes_count = len(list(db.collection("classes").stream() if admin_school_filter == "All Schools" else db.collection("classes").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()))
+        c3.markdown(f'<div class="stat-card"><div class="stat-number">{classes_count}</div><div class="stat-label">Classes</div></div>', unsafe_allow_html=True)
+
+    elif admin_page == "🎓 Students":
+        st.markdown(f'<div class="section-header">🎓 Manage Students ({admin_school_filter})</div>', unsafe_allow_html=True)
+        try:
+            if admin_school_filter == "All Schools":
+                students =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "student")).stream()]
+            else:
+                school_users = db.collection("users").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()
+                students =[{"id": d.id, **d.to_dict()} for d in school_users if d.to_dict().get("role") == "student"]
+            
+            if students:
+                st.table([{"Name": s.get("display_name", "—"), "Email": s.get("id", "—"), "Grade": s.get("grade", "—"), "School": s.get("school", "—")} for s in students])
+            else:
+                st.info("No students registered for this filter.")
+        except Exception as e: st.error(str(e))
+        
+        st.markdown('<div class="section-header">🗑️ Delete Student</div>', unsafe_allow_html=True)
+        del_id = st.text_input("Enter Student Email to Delete")
+        cascade = st.checkbox("Also delete their chat threads and analytics history", value=True)
+        if st.button("Permanently Delete Student", type="primary"):
+            if del_id:
+                try:
+                    db.collection("users").document(del_id).delete()
+                    if cascade:
+                        for t in db.collection("users").document(del_id).collection("threads").stream(): t.reference.delete()
+                        for a in db.collection("users").document(del_id).collection("analytics").stream(): a.reference.delete()
+                    st.success(f"Deleted student {del_id}")
+                except Exception as e: st.error(str(e))
+
+    elif admin_page == "👩‍🏫 Teachers":
+        st.markdown(f'<div class="section-header">👩‍🏫 Manage Teachers ({admin_school_filter})</div>', unsafe_allow_html=True)
+        try:
+            if admin_school_filter == "All Schools":
+                teachers =[{"id": d.id, **d.to_dict()} for d in db.collection("users").where(filter=firestore.FieldFilter("role", "==", "teacher")).stream()]
+            else:
+                school_users = db.collection("users").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()
+                teachers =[{"id": d.id, **d.to_dict()} for d in school_users if d.to_dict().get("role") == "teacher"]
+
+            if teachers:
+                st.table([{"Name": t.get("display_name", "—"), "Email": t.get("id", "—"), "School": t.get("school", "—")} for t in teachers])
+            else:
+                st.info("No teachers registered for this filter.")
+        except Exception as e: st.error(str(e))
+        
+        st.markdown('<div class="section-header">🗑️ Delete Teacher</div>', unsafe_allow_html=True)
+        del_t = st.text_input("Enter Teacher Email to delete")
+        if st.button("Delete Teacher", type="primary") and del_t:
+            db.collection("users").document(del_t).delete()
+            st.success("Deleted")
+
+    elif admin_page == "🏫 Classes":
+        st.markdown(f'<div class="section-header">🏫 Manage Classes ({admin_school_filter})</div>', unsafe_allow_html=True)
+        try:
+            if admin_school_filter == "All Schools":
+                classes =[{"id": d.id, **d.to_dict()} for d in db.collection("classes").stream()]
+            else:
+                classes =[{"id": d.id, **d.to_dict()} for d in db.collection("classes").where(filter=firestore.FieldFilter("school", "==", admin_school_filter)).stream()]
+
+            if classes:
+                st.table([{"Class ID": c.get("id", "—"), "Grade": c.get("grade", "—"), "School": c.get("school", "—")} for c in classes])
+            else:
+                st.info("No classes created for this filter.")
+        except Exception as e: st.error(str(e))
+        
+        st.markdown('<div class="section-header">🗑️ Delete Class</div>', unsafe_allow_html=True)
+        del_c = st.text_input("Enter Class ID to delete")
+        if st.button("Delete Class", type="primary") and del_c:
+            db.collection("classes").document(del_c).delete()
+            st.success("Deleted")
+
+    elif admin_page == "🧪 AI Debug Lab":
+        st.markdown('<div class="section-header">🧪 AI Debug Lab</div>', unsafe_allow_html=True)
+        m_choice = st.selectbox("Model",["gemini-3.1-flash-lite-preview", "gemini-2.5-flash", "gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3.1-pro-preview"])
+        d_prompt = st.text_area("Prompt")
+        if st.button("▶️ Run"):
+            with st.spinner("Running..."):
+                try:
+                    if "image" in m_choice.lower():
+                        res = process_visual_wrapper(("IMAGE_GEN", d_prompt))
+                        if res[0]: st.image(res[0])
+                        else: st.error(res[2])
+                    else:
+                        st.code(safe_response_text(client.models.generate_content(model=m_choice, contents=d_prompt)))
+                except Exception as e: st.error(e)
+
+if st.session_state.get("current_page") == "admin": render_admin_panel(); st.stop()
+
 # -----------------------------
 # 4) SIDEBAR
 # -----------------------------
@@ -521,6 +724,10 @@ with st.sidebar:
         st.divider()
 
         if user_role == "student":
+            st.markdown("<b style='color:#00d4ff'>📱 APP MODE</b>", unsafe_allow_html=True)
+            st.session_state.app_mode = st.radio("Choose Mode", ["💬 AI Tutor", "⚡ Interactive Quiz"], label_visibility="collapsed")
+            st.divider()
+
             if not user_profile.get("teacher_id"):
                 with st.expander("🎓 Are you a Teacher?"):
                     if st.button("Verify Code") and (code_input := st.text_input("Teacher Code", type="password")) in SCHOOL_CODES:
@@ -598,7 +805,7 @@ def upload_textbooks():
 if is_authenticated and "textbook_handles" not in st.session_state:
     with st.spinner("Preparing curriculum..."): st.session_state.textbook_handles = upload_textbooks()
 
-def select_relevant_books(query, file_dict):
+def select_relevant_books(query, file_dict, user_grade="Grade 6"):
     # FAST PATH: If this is a QUIZ request, only load the single most relevant book!
     if "QUIZ_REQUEST" in query:
         subj_match = re.search(r"Subject:\s*(Math|Science|English)", query)
@@ -622,8 +829,6 @@ def select_relevant_books(query, file_dict):
     isc = any(k in qn for k in["sci", "biology", "physics", "chemistry", "experiment", "cell", "gravity"])
     ien = any(k in qn for k in["eng", "poem", "story", "essay", "writing", "grammar"])
     
-    # Grab context from active grade if user didn't mention one
-    user_grade = st.session_state.get("active_grade", "Grade 6")
     if not (s7 or s8 or s9):
         if user_grade == "Grade 6": s7 = True
         elif user_grade == "Grade 7": s8 = True
@@ -651,7 +856,7 @@ render_chat_interface = False
 
 if user_role == "teacher":
     st.markdown("<div class='big-title' style='color:#fc8404;'>👨‍🏫 helix.ai / Teacher</div>", unsafe_allow_html=True)
-    st.text("helix.ai Teacher Dashboard: Manage Cambridge (CIE) classes, track student analytics, and generate detailed, multi-step question papers.")
+    st.markdown("<br>", unsafe_allow_html=True)
     
     user_school = user_profile.get("school")
     roster =[u for u in db.collection("users").where(filter=firestore.FieldFilter("school", "==", user_school)).stream() if u.to_dict().get("role") == "student"] if user_school else list(db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream())
@@ -692,7 +897,7 @@ if user_role == "teacher":
 
         if st.button("🤖 Generate with Helix AI", type="primary", use_container_width=True):
             with st.spinner("Writing paper..."):
-                books = select_relevant_books(f"{assign_subject} {assign_grade}", st.session_state.textbook_handles)
+                books = select_relevant_books(f"{assign_subject} {assign_grade}", st.session_state.textbook_handles, assign_grade)
                 parts =[]
                 for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
                 
@@ -712,7 +917,6 @@ if user_role == "teacher":
                 parts.append(types.Part.from_text(text=prompt_text))
                 
                 try:
-                    # Using gemini-2.5-pro for deep reasoning paper generation
                     resp = generate_with_retry(
                         model_target="gemini-2.5-pro", 
                         contents=parts, 
@@ -742,13 +946,7 @@ if user_role == "teacher":
     elif teacher_menu == "AI Chat": render_chat_interface = True 
 
 else:
-    # -----------------------------
-    # STUDENT VIEW: HOME DASHBOARD
-    # -----------------------------
-    st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
-    st.text("helix.ai: Your AI-powered Cambridge (CIE) Tutor for Grade 6-8. Master Math, Science, and English with deep, interactive learning.")
-    
-    app_mode = st.radio("Choose Mode",["💬 AI Tutor", "⚡ Interactive Quiz"], horizontal=True, label_visibility="collapsed")
+    app_mode = st.session_state.get("app_mode", "💬 AI Tutor")
     
     if app_mode == "⚡ Interactive Quiz":
         render_chat_interface = False
@@ -780,27 +978,28 @@ else:
             with st.spinner("Generating Lightning Quiz..."):
                 try:
                     p = st.session_state.quiz_params
-                    books = select_relevant_books(f"QUIZ_REQUEST: Subject: {p['subj']}, Grade: {p['grade']}", st.session_state.textbook_handles)
+                    books = select_relevant_books(f"QUIZ_REQUEST: Subject: {p['subj']}, Grade: {p['grade']}", st.session_state.textbook_handles, p['grade'])
                     
                     parts =[]
                     if books:
                         for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
                     
                     prompt = f"""
-                    Generate a {p['num']}-question quiz for {p['grade']} {p['subj']} on the topic: '{p['chap']}'. Difficulty: {p['diff']}.
+                    Generate a fast {p['num']}-question quiz for {p['grade']} {p['subj']} on the topic: '{p['chap']}'. Difficulty: {p['diff']}.
                     Based ONLY on the attached textbooks.
+                    CRITICAL FOR SPEED: Keep 'explanation' extremely short (10 words max).
                     Output EXACTLY a JSON array of objects. Do not include markdown formatting like ```json. Just the raw array.
                     Mix 'mcq' and 'short_answer' types.
                     Format:[
-                      {{ "type": "mcq", "question": "...", "options":["A", "B", "C", "D"], "answer": "Exact text of correct option", "explanation": "..." }},
+                      {{ "type": "mcq", "question": "...", "options": ["A", "B", "C", "D"], "answer": "Exact text of correct option", "explanation": "..." }},
                       {{ "type": "short_answer", "question": "...", "answer": "Key points expected.", "explanation": "..." }}
                     ]
                     """
                     parts.append(types.Part.from_text(text=prompt))
                     
-                    # Use the hyper-fast model for quiz generation
+                    # Use the highly optimized gemini-2.5-flash for incredibly fast quiz structure generation
                     resp = generate_with_retry(
-                        model_target="gemini-3-flash-preview", 
+                        model_target="gemini-2.5-flash", 
                         contents=parts, 
                         config=types.GenerateContentConfig(temperature=0.2)
                     )
@@ -809,6 +1008,12 @@ else:
                     json_str = re.sub(r"```json\s*", "", json_str)
                     json_str = re.sub(r"\s*```", "", json_str)
                     
+                    # More robust parsing
+                    start_bracket = json_str.find('[')
+                    end_bracket = json_str.rfind(']')
+                    if start_bracket != -1 and end_bracket != -1:
+                        json_str = json_str[start_bracket:end_bracket+1]
+                        
                     quiz_data = json.loads(json_str)
                     st.session_state.quiz_data = quiz_data
                     st.session_state.quiz_idx = 0
@@ -843,22 +1048,22 @@ else:
                                 if opt == current_q["answer"]:
                                     st.session_state.quiz_bg = "correct"
                                     st.session_state.quiz_score += 1
-                                    st.session_state.quiz_feedback = f"✅ **Correct!**\n\n{current_q['explanation']}"
+                                    st.session_state.quiz_feedback = f"✅ **Correct!**\n\n{current_q.get('explanation', '')}"
                                 else:
                                     st.session_state.quiz_bg = "wrong"
-                                    st.session_state.quiz_feedback = f"❌ **Incorrect.** The right answer was **{current_q['answer']}**.\n\n{current_q['explanation']}"
+                                    st.session_state.quiz_feedback = f"❌ **Incorrect.** The right answer was **{current_q['answer']}**.\n\n{current_q.get('explanation', '')}"
                                 st.rerun()
                                 
                     elif current_q["type"] == "short_answer":
                         user_ans = st.text_area("Your Answer:")
                         if st.button("Submit Answer", type="primary"):
                             with st.spinner("Grading..."):
-                                # AI Grader for Typed Answers
+                                # AI Grader for Typed Answers - uses hyperfast 3-flash-preview
                                 eval_prompt = f"""
                                 Student answered: {user_ans}
-                                Expected answer/key points: {current_q['answer']}
-                                Is the student correct? Evaluate generously.
-                                Respond in strict JSON: {{"status": "correct"|"partially_correct"|"wrong", "feedback": "Brief explanation. Give the correct answer if they were wrong, or elaborate if partially correct."}}
+                                Expected answer: {current_q['answer']}
+                                Is the student correct? 
+                                Respond in strict JSON: {{"status": "correct"|"partially_correct"|"wrong", "feedback": "Short feedback. Max 10 words."}}
                                 """
                                 try:
                                     eval_resp = generate_with_retry(
@@ -867,6 +1072,12 @@ else:
                                         config=types.GenerateContentConfig(temperature=0.1)
                                     )
                                     eval_json = re.sub(r"```json\s*|\s*```", "", safe_response_text(eval_resp))
+                                    
+                                    start_bracket = eval_json.find('{')
+                                    end_bracket = eval_json.rfind('}')
+                                    if start_bracket != -1 and end_bracket != -1:
+                                        eval_json = eval_json[start_bracket:end_bracket+1]
+                                        
                                     eval_data = json.loads(eval_json)
                                     
                                     st.session_state.quiz_state = "feedback"
@@ -916,7 +1127,7 @@ if render_chat_interface:
         with st.chat_message(msg["role"]):
             disp = msg.get("content") or ""
             
-            # Formatting for Quick Quizzes
+            # Formatting for Quick Quizzes (If any are left in history)
             if disp.startswith("QUIZ_REQUEST:"):
                 parts = disp.split(".\n\n")
                 params = parts[0].replace("QUIZ_REQUEST: ", "")
@@ -980,8 +1191,8 @@ if render_chat_interface:
 
                 curr_parts =[]
                 
-                student_grade = st.session_state.get("active_grade", "Grade 6")
-                books = select_relevant_books(msg_data.get("content", ""), st.session_state.textbook_handles)
+                student_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
+                books = select_relevant_books(msg_data.get("content", ""), st.session_state.textbook_handles, student_grade)
                 
                 if books:
                     st.caption(f"📚 **Reading Textbooks:** {', '.join([get_friendly_name(b.display_name) for b in books])}")
@@ -1004,7 +1215,7 @@ if render_chat_interface:
                 # Inject Active Grade Context to save the user from typing it manually
                 curr_parts.append(types.Part.from_text(text=f"Context: The student is in {student_grade}. Align your explanations to this level.\n\nUser Query: {msg_data.get('content')}"))
                 
-                # Standard Chat uses gemini-2.5-pro for maximum intelligence
+                # Normal Chat uses gemini-2.5-pro for deep reasoning
                 resp = generate_with_retry(
                     model_target="gemini-2.5-pro",
                     contents=valid_history +[types.Content(role="user", parts=curr_parts)],
