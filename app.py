@@ -746,3 +746,65 @@ if user_role == "teacher":
 
         if st.button("🤖 Generate with Helix AI", type="primary", use_container_width=True):
             with st.spinner("Writing paper..."):
+                books = select_relevant_books(f"{assign_subject} {assign_grade}", st.session_state.textbook_handles, assign_grade)
+                parts =[]
+                for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
+                
+                prompt_text = (
+                    f"Task: Generate a CIE {assign_subject} question paper for {assign_grade} students.\n"
+                    f"Difficulty: {assign_difficulty} (Ensure questions are complex, indirect, and harder than standard textbook problems. No childish logic).\n"
+                    f"Marks: {assign_marks}.\n"
+                    f"Extra Instructions: {assign_extra}\n\n"
+                    f"CRITICAL REMINDERS:\n"
+                    f"- Write the top Title exactly as:\n"
+                    f"# Helix A.I.\n## Practice Paper\n### {assign_subject} - {assign_grade}\n"
+                    f"- Do NOT output the word 'Stage' anywhere in the paper.\n"
+                    f"- Do NOT use topic titles or headings above questions. Just write '1.', '2.', etc. The student must deduce the concept.\n"
+                    f"- Balance the syllabus questions evenly.\n"
+                    f"- Append [PDF_READY] at the end."
+                )
+                parts.append(types.Part.from_text(text=prompt_text))
+                
+                try:
+                    # Using gemini-2.5-pro for deep reasoning paper generation
+                    resp = generate_with_retry(
+                        model_target="gemini-2.5-pro", 
+                        contents=parts, 
+                        config=types.GenerateContentConfig(system_instruction=PAPER_SYSTEM, temperature=0.1)
+                    )
+                    gen_paper = safe_response_text(resp)
+                    
+                    draft_imgs, draft_mods = [],[]
+                    if v_prompts := re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", gen_paper):
+                        with concurrent.futures.ThreadPoolExecutor(5) as exe:
+                            for r in exe.map(process_visual_wrapper, v_prompts):
+                                draft_imgs.append(r[0]); draft_mods.append(r[1])
+                                if not r[0] and len(r)>2: st.error(f"Image Error: {r[2]}")
+
+                    st.session_state.update(draft_paper=gen_paper, draft_images=draft_imgs, draft_models=draft_mods, draft_title=assign_title); st.rerun()
+                except Exception as e: st.error(e)
+
+        if st.session_state.get("draft_paper"):
+            with st.expander("Preview", expanded=True):
+                st.markdown(st.session_state.draft_paper.replace("[PDF_READY]", ""))
+                if st.session_state.draft_images:
+                    for i, m in zip(st.session_state.draft_images, st.session_state.draft_models):
+                        if i: st.image(i, caption=m)
+                try: st.download_button("Download PDF", data=create_pdf(st.session_state.draft_paper, st.session_state.draft_images), file_name=f"{st.session_state.draft_title}.pdf", mime="application/pdf")
+                except Exception as e: st.error(f"PDF Gen Error: {e}")
+
+    elif teacher_menu == "AI Chat": render_chat_interface = True 
+
+else:
+    app_mode = st.session_state.get("app_mode", "💬 AI Tutor")
+    
+    if app_mode == "⚡ Interactive Quiz":
+        render_chat_interface = False
+        
+        # --- QUIZ SETUP SCREEN ---
+        if not st.session_state.get("quiz_active", False):
+            st.markdown("<div class='quiz-title'>⚙️ Configure Your Quiz</div>", unsafe_allow_html=True)
+            with st.form("quick_quiz_form", border=False):
+                c1, c2, c3 = st.columns(3)
+                q_subj = c1.selectbox("Subject",["Math", "Science", "English"])
+                current_active_grade = st.se
