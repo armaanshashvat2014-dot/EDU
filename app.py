@@ -807,4 +807,280 @@ else:
             with st.form("quick_quiz_form", border=False):
                 c1, c2, c3 = st.columns(3)
                 q_subj = c1.selectbox("Subject",["Math", "Science", "English"])
-                current_active_grade = st.se
+                current_active_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
+                q_grade = c2.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"], index=["Grade 6", "Grade 7", "Grade 8"].index(current_active_grade))
+                q_diff = c3.selectbox("Difficulty",["Easy", "Medium", "Hard"])
+                
+                c4, c5 = st.columns([3, 1])
+                q_chap = c4.text_input("Chapter / Topic", placeholder="e.g. Chapter 4, Fractions, Forces...")
+                q_num = c5.selectbox("Questions",[5, 10, 15, 20])
+                
+                if st.form_submit_button("🚀 Start Interactive Quiz", type="primary", use_container_width=True):
+                    st.session_state.generating_quiz = True
+                    st.session_state.quiz_params = {"subj": q_subj, "grade": q_grade, "diff": q_diff, "chap": q_chap, "num": q_num}
+                    st.rerun()
+
+        # --- QUIZ GENERATION LOGIC ---
+        if st.session_state.get("generating_quiz"):
+            with st.spinner("Generating Lightning Quiz..."):
+                try:
+                    p = st.session_state.quiz_params
+                    books = select_relevant_books(f"QUIZ_REQUEST: Subject: {p['subj']}, Grade: {p['grade']}", st.session_state.textbook_handles, p['grade'])
+                    
+                    parts =[]
+                    if books:
+                        for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
+                    
+                    prompt = f"""
+                    Generate a fast {p['num']}-question quiz for {p['grade']} {p['subj']} on the topic: '{p['chap']}'. Difficulty: {p['diff']}.
+                    Based ONLY on the attached textbooks.
+                    CRITICAL FOR SPEED: Keep 'explanation' extremely short (max 1 sentence).
+                    Output EXACTLY a JSON array of objects. Do not include markdown formatting. Just the raw array.
+                    Mix 'mcq' and 'short_answer' types.
+                    Format:[
+                      {{ "type": "mcq", "question": "...", "options": ["A", "B", "C", "D"], "answer": "Exact text of correct option", "explanation": "..." }},
+                      {{ "type": "short_answer", "question": "...", "answer": "Key points expected.", "explanation": "..." }}
+                    ]
+                    """
+                    parts.append(types.Part.from_text(text=prompt))
+                    
+                    resp = generate_with_retry(
+                        model_target="gemini-2.5-flash", 
+                        contents=parts, 
+                        config=types.GenerateContentConfig(temperature=0.2, response_mime_type="application/json")
+                    )
+                    
+                    json_str = safe_response_text(resp)
+                    quiz_data = json.loads(json_str)
+                    st.session_state.quiz_data = quiz_data
+                    st.session_state.quiz_idx = 0
+                    st.session_state.quiz_score = 0
+                    st.session_state.quiz_state = "answering"
+                    st.session_state.quiz_bg = "default"
+                    st.session_state.quiz_active = True
+                    st.session_state.generating_quiz = False
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to generate quiz: {e}")
+                    st.session_state.generating_quiz = False
+
+        # --- QUIZ INTERFACE (LIQUID GLASS) ---
+        if st.session_state.get("quiz_active") and "quiz_data" in st.session_state:
+            q_idx = st.session_state.quiz_idx
+            q_data = st.session_state.quiz_data
+            
+            if q_idx < len(q_data):
+                current_q = q_data[q_idx]
+                
+                st.markdown('<div class="liquid-glass-card">', unsafe_allow_html=True)
+                st.markdown(f"<div style='opacity:0.7; font-weight:600; margin-bottom:10px;'>Question {q_idx + 1} of {len(q_data)}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='quiz-title'>{current_q['question']}</div>", unsafe_allow_html=True)
+                
+                # STATE 1: ANSWERING
+                if st.session_state.quiz_state == "answering":
+                    if current_q["type"] == "mcq":
+                        for opt in current_q["options"]:
+                            if st.button(opt, use_container_width=True, key=f"opt_{q_idx}_{opt}"):
+                                st.session_state.quiz_state = "feedback"
+                                if opt == current_q["answer"]:
+                                    st.session_state.quiz_bg = "correct"
+                                    st.session_state.quiz_score += 1
+                                    st.session_state.quiz_feedback = f"✅ **Correct!**\n\n{current_q.get('explanation', '')}"
+                                else:
+                                    st.session_state.quiz_bg = "wrong"
+                                    st.session_state.quiz_feedback = f"❌ **Incorrect.** The right answer was **{current_q['answer']}**.\n\n{current_q.get('explanation', '')}"
+                                st.rerun()
+                                
+                    elif current_q["type"] == "short_answer":
+                        user_ans = st.text_area("Your Answer:")
+                        if st.button("Submit Answer", type="primary"):
+                            with st.spinner("Grading..."):
+                                eval_prompt = f"""
+                                Student answered: {user_ans}
+                                Expected answer: {current_q['answer']}
+                                Is the student correct? 
+                                Respond in strict JSON: {{"status": "correct"|"partially_correct"|"wrong", "feedback": "Short feedback. Max 10 words."}}
+                                """
+                                try:
+                                    eval_resp = generate_with_retry(
+                                        model_target="gemini-2.5-flash", 
+                                        contents=[eval_prompt], 
+                                        config=types.GenerateContentConfig(temperature=0.1, response_mime_type="application/json")
+                                    )
+                                    eval_data = json.loads(safe_response_text(eval_resp))
+                                    
+                                    st.session_state.quiz_state = "feedback"
+                                    if eval_data["status"] == "wrong":
+                                        st.session_state.quiz_bg = "wrong"
+                                        st.session_state.quiz_feedback = f"❌ **Incorrect.**\n\n{eval_data['feedback']}"
+                                    else:
+                                        st.session_state.quiz_bg = "correct"
+                                        st.session_state.quiz_score += 1
+                                        icon = "✅" if eval_data["status"] == "correct" else "⚠️"
+                                        st.session_state.quiz_feedback = f"{icon} **{eval_data['status'].replace('_', ' ').title()}!**\n\n{eval_data['feedback']}"
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Grading Error: {e}")
+
+                # STATE 2: FEEDBACK
+                elif st.session_state.quiz_state == "feedback":
+                    st.info(st.session_state.quiz_feedback)
+                    if st.button("Next Question ➡️", use_container_width=True, type="primary"):
+                        st.session_state.quiz_idx += 1
+                        st.session_state.quiz_state = "answering"
+                        st.session_state.quiz_bg = "default"
+                        st.rerun()
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+            else:
+                # QUIZ COMPLETE
+                st.session_state.quiz_bg = "default"
+                st.markdown('<div class="liquid-glass-card" style="text-align:center;">', unsafe_allow_html=True)
+                st.markdown(f"<h2>🎉 Quiz Complete!</h2>", unsafe_allow_html=True)
+                st.markdown(f"<h3>You scored {st.session_state.quiz_score} out of {len(q_data)}</h3>", unsafe_allow_html=True)
+                if st.button("Finish & Return", type="primary", use_container_width=True):
+                    st.session_state.quiz_active = False
+                    del st.session_state.quiz_data
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+    else:
+        render_chat_interface = True
+        st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align: center; opacity: 0.60; font-size: 18px; margin-bottom: 30px;'>Your AI-powered Cambridge (CIE) Tutor for Grade 6-8. Master Math, Science, and English with deep, interactive learning.</div>", unsafe_allow_html=True)
+
+# ==========================================
+# UNIVERSAL CHAT VIEW 
+# ==========================================
+if render_chat_interface:
+    for idx, msg in enumerate(st.session_state.messages):
+        with st.chat_message(msg["role"]):
+            disp = msg.get("content") or ""
+            
+            if disp.startswith("QUIZ_REQUEST:"):
+                parts = disp.split(".\n\n")
+                params = parts[0].replace("QUIZ_REQUEST: ", "")
+                st.markdown(f"**⚡ Quiz Requested:** {params}")
+            else:
+                disp = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*", "", disp)
+                disp = re.sub(r"===ANALYTICS_START===.*?===ANALYTICS_END===", "", disp, flags=re.IGNORECASE|re.DOTALL)
+                disp = re.sub(r"```json\s*\{[^{]*?\"weak_point\".*?\}\s*```", "", disp, flags=re.IGNORECASE|re.DOTALL)
+                disp = re.sub(r"\{[^{]*?\"weak_point\".*?\}", "", disp, flags=re.IGNORECASE|re.DOTALL)
+                disp = re.sub(r"\[PDF_READY\]", "", disp, flags=re.IGNORECASE).strip()
+                st.markdown(disp)
+            
+            for img, mod in zip(msg.get("images") or[], msg.get("image_models",["Unknown"]*10)):
+                if img: st.image(img, use_container_width=True, caption=f"✨ Generated by helix.ai ({mod})")
+            for b64, mod in zip(msg.get("db_images") or[], msg.get("image_models", ["Unknown"]*10)):
+                if b64:
+                    try: st.image(base64.b64decode(b64), use_container_width=True, caption=f"✨ Generated by helix.ai ({mod})")
+                    except: pass
+            if msg.get("user_attachment_bytes"):
+                mime, name = msg.get("user_attachment_mime", ""), msg.get("user_attachment_name", "File")
+                if "image" in mime: st.image(msg["user_attachment_bytes"], use_container_width=True)
+                else: st.caption(f"📎 Attached: {name}")
+            elif msg.get("user_attachment_b64"):
+                mime, name = msg.get("user_attachment_mime", ""), msg.get("user_attachment_name", "File")
+                try: st.image(base64.b64decode(msg["user_attachment_b64"]), use_container_width=True)
+                except: st.caption(f"📎 Attached: {name}")
+            elif msg.get("user_attachment_name"):
+                name = msg.get("user_attachment_name", "File")
+                st.caption(f"📎 Attached: {name}")
+
+            if msg["role"] == "assistant" and msg.get("is_downloadable"):
+                try: st.download_button("📄 Download PDF", data=create_pdf(msg.get("content") or "", msg.get("images") or[base64.b64decode(b) for b in msg.get("db_images",[]) if b]), file_name=f"Paper_{idx}.pdf", mime="application/pdf", key=f"dl_{idx}")
+                except Exception as e: st.error(f"PDF Error: {e}")
+
+    if chat_input := st.chat_input("Ask Helix...", accept_file=True, file_type=["jpg","png","pdf","txt"]):
+        if "textbook_handles" not in st.session_state: st.session_state.textbook_handles = upload_textbooks()
+        
+        f_bytes = chat_input.files[0].getvalue() if chat_input.files else None
+        f_mime = chat_input.files[0].type if chat_input.files else None
+        f_name = chat_input.files[0].name if chat_input.files else None
+        
+        st.session_state.messages.append({"role": "user", "content": chat_input.text or "", "user_attachment_bytes": f_bytes, "user_attachment_mime": f_mime, "user_attachment_name": f_name})
+        save_chat_history(); st.rerun()
+
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        msg_data = st.session_state.messages[-1]
+        with st.chat_message("assistant"):
+            think = st.empty(); think.markdown("""<div class="thinking-container"><span class="thinking-text">Thinking</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
+            
+            try:
+                valid_history =[]
+                exp_role = "model"
+                for m in reversed([m for m in st.session_state.messages[:-1] if not m.get("is_greeting")]):
+                    r = "user" if m.get("role") == "user" else "model"
+                    txt = m.get("content") or ""
+                    if txt.strip() and r == exp_role:
+                        valid_history.insert(0, types.Content(role=r, parts=[types.Part.from_text(text=txt)]))
+                        exp_role = "user" if exp_role == "model" else "model"
+                if valid_history and valid_history[0].role == "model": valid_history.pop(0)
+
+                curr_parts =[]
+                student_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
+                books = select_relevant_books(" ".join([m.get("content","") for m in st.session_state.messages[-3:]]), st.session_state.textbook_handles, student_grade)
+                
+                if books:
+                    st.caption(f"📚 **Reading Textbooks:** {', '.join([get_friendly_name(b.display_name) for b in books])}")
+                    for b in books: 
+                        curr_parts.append(types.Part.from_text(text=f"--- START OF SOURCE TEXTBOOK: {b.display_name} ---"))
+                        curr_parts.append(types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf"))
+                        curr_parts.append(types.Part.from_text(text=f"--- END OF SOURCE TEXTBOOK ---"))
+                
+                if f_bytes := msg_data.get("user_attachment_bytes"):
+                    mime = msg_data.get("user_attachment_mime") or guess_mime(msg_data.get("user_attachment_name"))
+                    if is_image_mime(mime): curr_parts.append(types.Part.from_bytes(data=f_bytes, mime_type=mime))
+                    elif "pdf" in mime:
+                        tmp = f"temp_{time.time()}.pdf"
+                        with open(tmp, "wb") as f: f.write(f_bytes)
+                        up = client.files.upload_file(tmp)
+                        while up.state.name == "PROCESSING": time.sleep(1); up = client.files.get(name=up.name)
+                        curr_parts.append(types.Part.from_uri(file_uri=up.uri, mime_type="application/pdf"))
+                        os.remove(tmp)
+
+                curr_parts.append(types.Part.from_text(text=f"Context: The student is in {student_grade}. Align your explanations to this level.\n\nUser Query: {msg_data.get('content')}"))
+                
+                # Normal Chat uses gemini-2.5-flash for lightning-fast reasoning
+                resp = generate_with_retry(
+                    model_target="gemini-2.5-flash",
+                    contents=valid_history +[types.Content(role="user", parts=curr_parts)],
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.3, tools=[{"google_search": {}}])
+                )
+                bot_txt = safe_response_text(resp) or "⚠️ *Failed to generate text.*"
+                
+                match_full = re.search(r"===ANALYTICS_START===(.*?)===ANALYTICS_END===", bot_txt, flags=re.IGNORECASE|re.DOTALL)
+                if not match_full:
+                    match_full = re.search(r"(?:(?:Here is the )?Analytics.*?:?\s*|```json\s*)?(\{[\s\S]*?\"weak_point\"[\s\S]*?\})(?:\s*```)?", bot_txt, flags=re.IGNORECASE)
+                
+                if match_full:
+                    try:
+                        ad = json.loads(match_full.group(1))
+                        start_idx = match_full.start()
+                        bot_txt = bot_txt[:start_idx].strip()
+                        bot_txt = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*$", "", bot_txt).strip()
+                        
+                        if is_authenticated and db: db.collection("users").document(user_email).collection("analytics").add({"timestamp": time.time(), **ad})
+                    except Exception: pass
+
+                think.empty()
+                
+                imgs, mods = [],[]
+                if v_prompts := re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", bot_txt):
+                    with concurrent.futures.ThreadPoolExecutor(5) as exe:
+                        for r in exe.map(process_visual_wrapper, v_prompts):
+                            if r and r[0]: imgs.append(r[0]); mods.append(r[1])
+                            else: imgs.append(None); mods.append("Failed")
+                
+                dl = bool(re.search(r"\[PDF_READY\]", bot_txt, re.IGNORECASE) or (re.search(r"##\s*Mark Scheme", bot_txt, re.IGNORECASE) and re.search(r"\[\d+\]", bot_txt)))
+                st.session_state.messages.append({"role": "assistant", "content": bot_txt, "is_downloadable": dl, "images": imgs, "image_models": mods})
+                
+                if is_authenticated and sum(1 for m in st.session_state.messages if m["role"] == "user") == 1:
+                    t = generate_chat_title(client, st.session_state.messages)
+                    if t: get_threads_collection().document(st.session_state.current_thread_id).set({"title": t}, merge=True)
+                
+                save_chat_history(); st.rerun()
+                
+            except Exception as e: think.empty(); st.error(f"Error: {e}")
+            
