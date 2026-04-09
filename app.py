@@ -182,7 +182,7 @@ You MUST design questions that are significantly harder than standard textbook d
 # Helix A.I.
 ## Practice Paper
 ### [SUBJECT] - [GRADE]
-- MARK SCHEME: Put "## Mark Scheme" at the very bottom. You MUST use IMAGE_GEN:[...] inside the mark scheme to draw the correct visual answers for geometry/graph questions!
+- MARK SCHEME: Put "## Mark Scheme" at the very bottom. You MUST use IMAGE_GEN:[...] inside the mark scheme to draw the correct visual answers for geometry/graph questions! State coordinates.
 
 ### RULE 7: Analytics for students (CRITICAL, HIDDEN):
 At the VERY END of your response, output a hidden analytics block (unless a casual chat) wrapped EXACTLY like this:
@@ -318,9 +318,9 @@ def compress_image_for_db(image_bytes: bytes) -> str:
     try:
         if not image_bytes: return None
         img = Image.open(BytesIO(image_bytes)).convert('RGB')
-        img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+        img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
         buf = BytesIO()
-        img.save(buf, format="JPEG", quality=75, optimize=True)
+        img.save(buf, format="JPEG", quality=85, optimize=True)
         return base64.b64encode(buf.getvalue()).decode('utf-8')
     except Exception: return None
 
@@ -392,10 +392,9 @@ def generate_with_retry(model_target, contents, config, retries=3):
             err_str = str(e).lower()
             if "503" in err_str or "unavailable" in err_str or "overloaded" in err_str or "429" in err_str or "quota" in err_str:
                 if attempt < retries - 1:
-                    time.sleep(1.5 ** attempt) # Quick exponential backoff
+                    time.sleep(1.5 ** attempt) 
                     continue
             
-            # If all retries failed, fallback to the most stable high-speed flash model
             try:
                 st.toast(f"⚠️ {model_target} overloaded. Switching to high-speed fallback...", icon="⚡")
                 fallback_model = "gemini-2.5-flash-lite" if "flash" in model_target else "gemini-2.5-flash"
@@ -657,7 +656,6 @@ if is_authenticated and "textbook_handles" not in st.session_state:
     with st.spinner("Preparing curriculum..."): st.session_state.textbook_handles = upload_textbooks()
 
 def select_relevant_books(query, file_dict, user_grade="Grade 6"):
-    # FAST PATH: If this is a QUIZ request, only load the single most relevant book!
     if "QUIZ_REQUEST" in query:
         subj_match = re.search(r"Subject:\s*(Math|Science|English)", query)
         grade_match = re.search(r"Grade:\s*(Grade 6|Grade 7|Grade 8)", query)
@@ -668,9 +666,8 @@ def select_relevant_books(query, file_dict, user_grade="Grade 6"):
             for b in file_dict.get(q_subj,[]):
                 n = b.display_name.lower()
                 if q_grade in n and "answers" not in n:
-                    return [b] # Return exactly 1 book to make generation insanely fast!
+                    return [b] 
 
-    # STANDARD PATH
     qn = normalize_stage_text(query)
     s7 = any(k in qn for k in["stage 7", "grade 6", "year 7"])
     s8 = any(k in qn for k in["stage 8", "grade 7", "year 8"])
@@ -695,14 +692,14 @@ def select_relevant_books(query, file_dict, user_grade="Grade 6"):
                 if "answers" in n and user_role != "teacher": continue
                 if (s7 and "cie_7" in n) or (s8 and "cie_8" in n) or (s9 and "cie_9" in n): 
                     sel.append(b)
-                    break # Fast path: grab only the first matching book per subject for chat
-    
+                    break 
     add("math", im); add("sci", isc); add("eng", ien)
-    return sel[:2] # Limit to max 2 books for standard chat to speed up responses!
+    return sel[:2] 
 
 # ==========================================
-# APP ROUTING: TEACHER DASHBOARD
+# APP ROUTING
 # ==========================================
+app_mode = st.session_state.get("app_mode", "💬 AI Tutor")
 render_chat_interface = False 
 
 if user_role == "teacher":
@@ -783,14 +780,13 @@ if user_role == "teacher":
 
     elif teacher_menu == "AI Chat": render_chat_interface = True 
 
-else:
-    app_mode = st.session_state.get("app_mode", "💬 AI Tutor")
+elif app_mode == "⚡ Interactive Quiz":
+    render_chat_interface = False
     
-    if app_mode == "⚡ Interactive Quiz":
-        render_chat_interface = False
-        
-        # --- QUIZ SETUP SCREEN ---
-        if not st.session_state.get("quiz_active", False):
+    # --- QUIZ SETUP SCREEN ---
+    if not st.session_state.get("quiz_active", False):
+        st.markdown("<br><br>", unsafe_allow_html=True) # Vertical centering
+        with st.container(border=False):
             st.markdown("<div class='quiz-title'>⚙️ Configure Your Quiz</div>", unsafe_allow_html=True)
             with st.form("quick_quiz_form", border=False):
                 with st.container(border=True):
@@ -809,6 +805,102 @@ else:
                         st.session_state.quiz_params = {"subj": q_subj, "grade": q_grade, "diff": q_diff, "chap": q_chap, "num": q_num}
                         st.rerun()
 
+    # --- QUIZ GENERATION LOGIC ---
+    if st.session_state.get("generating_quiz"):
+        with st.spinner("Generating Lightning Quiz..."):
+            try:
+                p = st.session_state.quiz_params
+                books = select_relevant_books(f"QUIZ_REQUEST: Subject: {p['subj']}, Grade: {p['grade']}", st.session_state.textbook_handles, p['grade'])
+                
+                parts =[]
+                if books:
+                    for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
+                
+                prompt = f"""
+                Generate a fast {p['num']}-question quiz for {p['grade']} {p['subj']} on the topic: '{p['chap']}'. Difficulty: {p['diff']}.
+                Based ONLY on the attached textbooks.
+                CRITICAL FOR SPEED: Keep 'explanation' extremely short (1 short sentence max).
+                Output EXACTLY a JSON array of objects. Do not include markdown. Just the raw array.
+                Format:[
+                    {{ "type": "mcq", "question": "...", "options": ["A", "B", "C", "D"], "answer": "...", "explanation": "..." }},
+                    {{ "type": "short_answer", "question": "...", "answer": "...", "explanation": "..." }}
+                ]
+                """
+                parts.append(types.Part.from_text(text=prompt))
+                
+                resp = generate_with_retry(
+                    model_target="gemini-2.5-flash", 
+                    contents=parts, 
+                    config=types.GenerateContentConfig(temperature=0.2, response_mime_type="application/json")
+                )
+                
+                quiz_data = json.loads(safe_response_text(resp))
+                st.session_state.quiz_data = quiz_data
+                st.session_state.quiz_idx = 0
+                st.session_state.quiz_score = 0
+                st.session_state.quiz_state = "answering"
+                st.session_state.quiz_bg = "default"
+                st.session_state.quiz_active = True
+                st.session_state.generating_quiz = False
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to generate quiz: {e}")
+                st.session_state.generating_quiz = False
+
+    # --- QUIZ INTERFACE (LIQUID GLASS) ---
+    if st.session_state.get("quiz_active") and "quiz_data" in st.session_state:
+        q_idx = st.session_state.quiz_idx
+        q_data = st.session_state.quiz_data
+        
+        if q_idx < len(q_data):
+            current_q = q_data[q_idx]
+            
+            with st.container(border=True):
+                st.markdown(f"<div style='opacity:0.7; font-weight:600; margin-bottom:10px;'>Question {q_idx + 1} of {len(q_data)}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='quiz-title'>{current_q['question']}</div>", unsafe_allow_html=True)
+                
+                if st.session_state.quiz_state == "answering":
+                    if current_q["type"] == "mcq":
+                        for opt in current_q["options"]:
+                            if st.button(opt, use_container_width=True, key=f"opt_{q_idx}_{opt}"):
+                                st.session_state.quiz_state = "feedback"
+                                if opt == current_q["answer"]:
+                                    st.session_state.quiz_bg, st.session_state.quiz_score, st.session_state.quiz_feedback = "correct", st.session_state.quiz_score + 1, f"✅ **Correct!**\n\n{current_q.get('explanation', '')}"
+                                else:
+                                    st.session_state.quiz_bg, st.session_state.quiz_feedback = "wrong", f"❌ **Incorrect.** The right answer was **{current_q['answer']}**.\n\n{current_q.get('explanation', '')}"
+                                st.rerun()
+                                
+                    elif current_q["type"] == "short_answer":
+                        user_ans = st.text_area("Your Answer:")
+                        if st.button("Submit Answer", type="primary"):
+                            with st.spinner("Grading..."):
+                                eval_prompt = f"Student answered: {user_ans}\nExpected answer: {current_q['answer']}\nIs the student correct? Respond in strict JSON: {{\"status\": \"correct\"|\"partially_correct\"|\"wrong\", \"feedback\": \"Short feedback. Max 10 words.\"}}"
+                                try:
+                                    eval_resp = generate_with_retry(
+                                        model_target="gemini-2.5-flash", 
+                                        contents=[eval_prompt], 
+                                        config=types.GenerateContentConfig(temperature=0.1, response_mime_type="application/json")
+                                    )
+                                    eval_data = json.loads(safe_response_text(eval_resp))
+                                    
+                                    st.session_state.quiz_state = "feedback"
+                                    if eval_data["status"] == "wrong":
+                                        st.session_state.quiz_bg, st.session_state.quiz_feedback = "wrong", f"❌ **Incorrect.**\n\n{eval_data['feedback']}"
+                                    else:
+                                        st.session_state.quiz_bg, st.session_state.quiz_score = "correct", st.session_state.quiz_score + 1
+                                        st.session_state.quiz_feedback = f"{'✅' if eval_data['status'] == 'correct' else '⚠️'} **{eval_data['status'].replace('_', ' ').title()}!**\n\n{eval_data['feedback']}"
+                                    st.rerun()
+                                except Exception as e: st.error(f"Grading Error: {e}")
+                elif st.session_state.quiz_state == "feedback":
+                    st.info(st.session_state.quiz_feedback)
+                    if st.button("Next Question ➡️", use_container_width=True, type="primary"):
+                        st.session_state.quiz_idx += 1; st.session_state.quiz_state = "answering"; st.session_state.quiz_bg = "default"; st.rerun()
+        else:
+            st.session_state.quiz_bg = "default"
+            with st.container(border=True):
+                st.markdown(f"<h2 style='text-align:center;'>🎉 Quiz Complete!</h2><h3 style='text-align:center;'>You scored {st.session_state.quiz_score} out of {len(q_data)}</h3>", unsafe_allow_html=True)
+                if st.button("Finish & Return", type="primary", use_container_width=True):
+                    st.session_state.quiz_active = False; del st.session_state.quiz_data; st.rerun()
     else:
         render_chat_interface = True
         st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
@@ -821,18 +913,14 @@ if render_chat_interface:
     for idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             disp = msg.get("content") or ""
-            
             if disp.startswith("QUIZ_REQUEST:"):
-                parts = disp.split(".\n\n")
-                params = parts[0].replace("QUIZ_REQUEST: ", "")
-                st.markdown(f"**⚡ Quiz Requested:** {params}")
+                st.markdown(f"**⚡ Quiz Requested:** {disp.split('.\n\n')[0].replace('QUIZ_REQUEST: ', '')}")
             else:
                 disp = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*", "", disp)
                 disp = re.sub(r"===ANALYTICS_START===.*?===ANALYTICS_END===", "", disp, flags=re.IGNORECASE|re.DOTALL)
                 disp = re.sub(r"```json\s*\{[^{]*?\"weak_point\".*?\}\s*```", "", disp, flags=re.IGNORECASE|re.DOTALL)
                 disp = re.sub(r"\{[^{]*?\"weak_point\".*?\}", "", disp, flags=re.IGNORECASE|re.DOTALL)
-                disp = re.sub(r"\[PDF_READY\]", "", disp, flags=re.IGNORECASE).strip()
-                st.markdown(disp)
+                st.markdown(re.sub(r"\[PDF_READY\]", "", disp, flags=re.IGNORECASE).strip())
             
             for img, mod in zip(msg.get("images") or[], msg.get("image_models",["Unknown"]*10)):
                 if img: st.image(img, use_container_width=True, caption=f"✨ Generated by helix.ai ({mod})")
@@ -845,12 +933,9 @@ if render_chat_interface:
                 if "image" in mime: st.image(msg["user_attachment_bytes"], use_container_width=True)
                 else: st.caption(f"📎 Attached: {name}")
             elif msg.get("user_attachment_b64"):
-                mime, name = msg.get("user_attachment_mime", ""), msg.get("user_attachment_name", "File")
                 try: st.image(base64.b64decode(msg["user_attachment_b64"]), use_container_width=True)
-                except: st.caption(f"📎 Attached: {name}")
-            elif msg.get("user_attachment_name"):
-                name = msg.get("user_attachment_name", "File")
-                st.caption(f"📎 Attached: {name}")
+                except: st.caption(f"📎 Attached: {msg.get('user_attachment_name', 'File')}")
+            elif msg.get("user_attachment_name"): st.caption(f"📎 Attached: {msg.get('user_attachment_name', 'File')}")
 
             if msg["role"] == "assistant" and msg.get("is_downloadable"):
                 try: st.download_button("📄 Download PDF", data=create_pdf(msg.get("content") or "", msg.get("images") or[base64.b64decode(b) for b in msg.get("db_images",[]) if b]), file_name=f"Paper_{idx}.pdf", mime="application/pdf", key=f"dl_{idx}")
@@ -883,12 +968,10 @@ if render_chat_interface:
                 if valid_history and valid_history[0].role == "model": valid_history.pop(0)
 
                 curr_parts =[]
-                # Explicitly pass the student's grade to make book matching bulletproof
                 student_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
                 books = select_relevant_books(" ".join([m.get("content","") for m in st.session_state.messages[-3:]]), st.session_state.textbook_handles, student_grade)
                 
                 if books:
-                    st.caption(f"📚 **Reading Textbooks:** {', '.join([get_friendly_name(b.display_name) for b in books])}")
                     for b in books: 
                         curr_parts.append(types.Part.from_text(text=f"--- START OF SOURCE TEXTBOOK: {b.display_name} ---"))
                         curr_parts.append(types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf"))
@@ -898,35 +981,22 @@ if render_chat_interface:
                     mime = msg_data.get("user_attachment_mime") or guess_mime(msg_data.get("user_attachment_name"))
                     if is_image_mime(mime): curr_parts.append(types.Part.from_bytes(data=f_bytes, mime_type=mime))
                     elif "pdf" in mime:
-                        tmp = f"temp_{time.time()}.pdf"
-                        with open(tmp, "wb") as f: f.write(f_bytes)
-                        up = client.files.upload_file(tmp)
+                        tmp = f"temp_{time.time()}.pdf"; open(tmp, "wb").write(f_bytes); up = client.files.upload_file(tmp)
                         while up.state.name == "PROCESSING": time.sleep(1); up = client.files.get(name=up.name)
-                        curr_parts.append(types.Part.from_uri(file_uri=up.uri, mime_type="application/pdf"))
-                        os.remove(tmp)
+                        curr_parts.append(types.Part.from_uri(file_uri=up.uri, mime_type="application/pdf")); os.remove(tmp)
 
-                curr_parts.append(types.Part.from_text(text=f"Context: The student is in {student_grade}.\n\nUser Query: {msg_data.get('content')}"))
-                
-                resp = generate_with_retry(
-                    model_target="gemini-3.1-flash-lite-preview",
-                    contents=valid_history +[types.Content(role="user", parts=curr_parts)],
-                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.3, tools=[{"google_search": {}}])
-                )
+                curr_parts.append(types.Part.from_text(text=f"Context: Student Grade is {student_grade}.\n\nUser Query: {msg_data.get('content')}"))
+                resp = generate_with_retry("gemini-2.5-pro", valid_history +[types.Content(role="user", parts=curr_parts)], types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.3, tools=[{"google_search": {}}]))
                 bot_txt = safe_response_text(resp) or "⚠️ *Failed to generate text.*"
                 
-                # Strict Boundary Analytics Extraction (With conversational text removal)
                 match_full = re.search(r"===ANALYTICS_START===(.*?)===ANALYTICS_END===", bot_txt, flags=re.IGNORECASE|re.DOTALL)
                 if not match_full:
-                    # Fallback
                     match_full = re.search(r"(?:(?:Here is the )?Analytics.*?:?\s*|```json\s*)?(\{[\s\S]*?\"weak_point\"[\s\S]*?\})(?:\s*```)?", bot_txt, flags=re.IGNORECASE)
                 
                 if match_full:
                     try:
                         ad = json.loads(match_full.group(1))
-                        # Find the index where the match starts, and strip out any conversational lead-in before it
-                        start_idx = match_full.start()
-                        bot_txt = bot_txt[:start_idx].strip()
-                        # Also replace any stray prefix lines that might have slipped through
+                        bot_txt = bot_txt.replace(match_full.group(0), "").strip()
                         bot_txt = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*$", "", bot_txt).strip()
                         
                         if is_authenticated and db: db.collection("users").document(user_email).collection("analytics").add({"timestamp": time.time(), **ad})
@@ -939,7 +1009,6 @@ if render_chat_interface:
                     with concurrent.futures.ThreadPoolExecutor(5) as exe:
                         for r in exe.map(process_visual_wrapper, v_prompts):
                             if r and r[0]: imgs.append(r[0]); mods.append(r[1])
-                            else: imgs.append(None); mods.append("Failed")
                 
                 dl = bool(re.search(r"\[PDF_READY\]", bot_txt, re.IGNORECASE) or (re.search(r"##\s*Mark Scheme", bot_txt, re.IGNORECASE) and re.search(r"\[\d+\]", bot_txt)))
                 st.session_state.messages.append({"role": "assistant", "content": bot_txt, "is_downloadable": dl, "images": imgs, "image_models": mods})
