@@ -7,7 +7,7 @@ import json
 import concurrent.futures
 import base64
 from pathlib import Path
-from io import BytesIOx
+from io import BytesIO
 from PIL import Image
 
 from google import genai
