@@ -54,28 +54,25 @@ st.markdown(f"""
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
 }}
 
-/* Sidebar Glassmorphism */
-[data-testid="stSidebar"] {{
+/* Sidebar Glassmorphism */[data-testid="stSidebar"] {{
     background: rgba(25, 25, 35, 0.4) !important;
     backdrop-filter: blur(40px) !important;
     -webkit-backdrop-filter: blur(40px) !important;
     border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
 }}
 
-/* Native Streamlit Form & Container Glass UI */
-[data-testid="stForm"],[data-testid="stVerticalBlockBorderWrapper"] {{
+/* Native Streamlit Form & Container Glass UI */[data-testid="stForm"],[data-testid="stVerticalBlockBorderWrapper"] {{
     background: rgba(255, 255, 255, 0.04) !important;
     backdrop-filter: blur(40px) !important;
     -webkit-backdrop-filter: blur(40px) !important;
     border: 1px solid rgba(255, 255, 255, 0.15) !important;
     border-radius: 28px !important;
-    padding: 10px !important;
+    padding: 24px !important;
     box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
     margin: 20px 0 !important;
 }}
 
-/* Glass Chat Bubbles */
-[data-testid="stChatMessage"] {{
+/* Glass Chat Bubbles */[data-testid="stChatMessage"] {{
     background: rgba(255, 255, 255, 0.05) !important;
     backdrop-filter: blur(24px) !important;
     -webkit-backdrop-filter: blur(24px) !important;
@@ -85,8 +82,7 @@ st.markdown(f"""
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
     color: #fff !important;
     margin-bottom: 16px;
-}}
-[data-testid="stChatMessage"] * {{ color: #f5f5f7 !important; }}
+}}[data-testid="stChatMessage"] * {{ color: #f5f5f7 !important; }}
 
 /* Glass Inputs (Chat & Forms) */
 .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea, .stNumberInput>div>div>input {{
@@ -595,9 +591,8 @@ with st.sidebar:
     else:
         st.success(f"Welcome back, {user_profile.get('display_name', 'User')}!")
         
-        # 🎯 FIX: Buttons exactly in requested order under the Welcome box
+        # Account and Logout buttons are now here
         if st.button("👤 My Account", use_container_width=True):
-            # We set a distinct state for the account page to avoid conflict with the radio button
             st.session_state.view_mode = "account"
             st.rerun()
         if st.button("Log out", use_container_width=True):
@@ -606,7 +601,7 @@ with st.sidebar:
             
         st.divider()
         
-        # If in account view, show a button to go back to the main app modes
+        # Show a "Back to App" button if in account view
         if st.session_state.get("view_mode") == "account":
             if st.button("🔙 Back to App", use_container_width=True):
                 st.session_state.view_mode = "main"
@@ -782,7 +777,7 @@ elif user_role == "teacher":
         if not roster: st.info("No students enrolled yet.")
         else:
             selected_student_name = st.selectbox("Select Student",[r.to_dict().get('display_name', r.id) for r in roster])
-            student_doc_list =[r for r in roster if r.to_dict().get('display_name', r.id) == selected_student_name]
+            student_doc_list = [r for r in roster if r.to_dict().get('display_name', r.id) == selected_student_name]
             if student_doc_list:
                 stu_email = student_doc_list.id
                 
@@ -996,10 +991,7 @@ if render_chat_interface:
     if chat_input := st.chat_input("Ask Helix...", accept_file=True, file_type=["jpg","png","pdf","txt"]):
         if "textbook_handles" not in st.session_state: st.session_state.textbook_handles = upload_textbooks()
         
-        f_bytes = chat_input.files.getvalue() if chat_input.files else None
-        f_mime = chat_input.files.type if chat_input.files else None
-        f_name = chat_input.files.name if chat_input.files else None
-        
+        f_bytes, f_mime, f_name = (chat_input.files.getvalue() if chat_input.files else None), (chat_input.files.type if chat_input.files else None), (chat_input.files.name if chat_input.files else None)
         st.session_state.messages.append({"role": "user", "content": (chat_input.text or "").strip(), "user_attachment_bytes": f_bytes, "user_attachment_mime": f_mime, "user_attachment_name": f_name})
         save_chat_history(); st.rerun()
 
