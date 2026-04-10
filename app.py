@@ -46,6 +46,7 @@ else:
     bg_style = "radial-gradient(800px circle at 50% 0%, rgba(0, 212, 255, 0.12), rgba(0, 212, 255, 0.00) 60%), #0a0a1a"
 
 # iOS 26 LIQUID GLASS CSS ENGINE
+# 🎯 FIX APPLIED: Mobile hover issues fixed via @media query so buttons don't get stuck on Samsung!
 st.markdown(f"""
 <style>
 /* Core App Background & Typography */
@@ -65,7 +66,7 @@ st.markdown(f"""
 }}
 
 /* Native Streamlit Form & Container Glass UI (Fixes empty box bug) */
-[data-testid="stForm"], [data-testid="stVerticalBlockBorderWrapper"] {{
+[data-testid="stForm"],[data-testid="stVerticalBlockBorderWrapper"] {{
     background: rgba(255, 255, 255, 0.04) !important;
     backdrop-filter: blur(40px) !important;
     -webkit-backdrop-filter: blur(40px) !important;
@@ -109,11 +110,20 @@ st.markdown(f"""
     font-weight: 600 !important;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
 }}
-.stButton>button:hover {{
-    background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 100%) !important;
-    border-color: rgba(255,255,255,0.4) !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+
+/* Only apply hover effects on devices with a mouse to prevent Samsung mobile sticky hover bug */
+@media (hover: hover) and (pointer: fine) {{
+    .stButton>button:hover {{
+        background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 100%) !important;
+        border-color: rgba(255,255,255,0.4) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+    }}
+}}
+
+.stButton>button:active {{
+    transform: translateY(1px) !important;
+    background: rgba(255,255,255,0.2) !important;
 }}
 
 /* Original Orange Thinking Animation */
@@ -154,21 +164,20 @@ You are Helix, an elite Cambridge (CIE) Tutor and Examiner for Grade 6-8 student
 ### RULE 1: RAG SEARCH & SCOPE (CRITICAL)
 - Search the attached PDF textbooks using OCR FIRST.
 - STRICT SCOPE: If the user requests specific chapters, topics, or a range (e.g., "Chapters 1-3" or "Fractions"), you MUST STRICTLY RESTRICT all questions to ONLY those requested chapters. NEVER generate questions from unrequested chapters.
-- If (and ONLY if) the user asks for a general paper without specifying chapters, then your questions MUST be perfectly balanced across the entire uploaded syllabus.
-
+- If (and ONLY if) the user asks for a general paper without specifying chapters, then your questions MUST be perfectly balanced across the entire uploaded syllabus. Do not overwork one chapter and ignore another.
 
 ### RULE 2: STRICT CAMBRIDGE QUESTION DEPTH & FORMATTING (CRITICAL)
 You MUST design questions that are significantly harder than standard textbook drills. They must force multi-step reasoning, critical analysis, and data synthesis. Do NOT explicitly use the word "HOTS" or "Higher Order" in your output.
 
-- INDIRECT QUESTIONS (NO TOPIC TITLES): NEVER give questions a title/heading that reveals the topic. Just write "1.", "2.". The student MUST deduce which mathematical/scientific concept to apply based on the wording of the problem.
+- INDIRECT QUESTIONS (NO TOPIC TITLES): NEVER give questions a title/heading that reveals the topic (e.g., DO NOT write "1. Fractions:", "2. Geometry:", or "3. Division:"). Just write "1.", "2.". The student MUST deduce which mathematical/scientific concept to apply based on the wording of the problem.
 - NO CHILDISH TROPES: DO NOT use the "counting animal legs on a farm" trope. Use realistic, sophisticated scenarios.
-- NO VAGUE SHAPES: For any transformation (rotation, reflection, enlargement), you MUST define the shape using exact grid coordinates.
-- TABLE FORMATTING: You MUST use strict Markdown tables. DO NOT use spaces for alignment.
+- NO VAGUE SHAPES: For any transformation (rotation, reflection, enlargement), you MUST define the shape using exact grid coordinates (e.g., "A triangle has vertices at A(2,2), B(4,2), and C(2,5)").
+- TABLE FORMATTING: You MUST use strict Markdown tables (e.g., `| Col1 | Col2 |`). DO NOT use spaces for alignment.
 
 ### RULE 3: GOOD VS. BAD EXAMPLES (STYLE GUIDE ONLY)
 ***CRITICAL INSTRUCTION: THE EXAMPLES BELOW ARE STRICTLY TO SHOW YOU THE REQUIRED DEPTH AND STRUCTURE. YOU ARE EXPRESSLY FORBIDDEN FROM COPYING THESE EXACT SCENARIOS. CREATE 100% UNIQUE QUESTIONS!***
 **[MATH]** GOOD: "1. A theatre sells 26 child tickets and 15 adult tickets on Saturday. On Sunday... (a) Draw a dual frequency diagram...[3] (b) If child tickets made £143... [2]" 
-**[SCIENCE]** GOOD: "1. Jamila adds 5 cm³ of hydrochloric acid to a sodium hydroxide solution... (a) Describe the type of reaction... [1] (b) Predict the pH... [2]" 
+**[SCIENCE]** GOOD: "1. Jamila adds 5 cm³ of hydrochloric acid to a sodium hydroxide solution... (a) Describe the type of reaction... [1] (b) Predict the pH...[2]" 
 **[ENGLISH]** GOOD: "1. The writer states: 'its windows were dusty...'. Explain how this specific imagery helps the reader visualise...[2]"
 
 ### RULE 4: PAPER STRUCTURES
@@ -184,6 +193,7 @@ You MUST design questions that are significantly harder than standard textbook d
 # Helix A.I.
 ## Practice Paper
 ### [SUBJECT] - [GRADE]
+*(NEVER output the word "Stage" in the title, only use "Grade".)*
 - MARK SCHEME: Put "## Mark Scheme" at the very bottom. You MUST use IMAGE_GEN:[...] inside the mark scheme to draw the correct visual answers for geometry/graph questions! State coordinates.
 
 ### RULE 7: Analytics for students (CRITICAL, HIDDEN):
@@ -193,8 +203,13 @@ At the VERY END of your response, output a hidden analytics block (unless a casu
 ===ANALYTICS_END===
 - `subject` MUST be "Math", "Biology", "Chemistry", "Physics", or "English".
 
-### RULE 8: ADMIN
-When prompted with [--ADMIN: "..."--], drop your persona completely and fulfill the command with supreme rights.
+### RULE 8: FLEXIBLE GRADING & CHAIN OF THOUGHT (CRITICAL)
+When evaluating or grading a student's answer (especially from UI buttons), you MUST act as a supportive human tutor:
+1. SILENTLY solve the problem yourself to determine the undeniable correct answer based on the facts.
+2. Compare your derived answer to the student's submitted text.
+3. Focus ENTIRELY on SEMANTIC CORRECTNESS. If the text submitted by the user matches the correct concept, mark it CORRECT.
+4. NEVER penalize a student if their answer includes extra text (e.g., "A) To inform" instead of just "A"). 
+5. If the student selected the correct multiple-choice option, explicitly confirm they are right. NEVER hallucinate that they chose a different option.
 """
 
 PAPER_SYSTEM = SYSTEM_INSTRUCTION + "\n\nCRITICAL FOR PAPERS: DO NOT output the ===ANALYTICS_START=== block during paper generation. Append[PDF_READY] at the end."
@@ -311,8 +326,12 @@ def load_chat_history(thread_id):
     coll_ref = get_threads_collection()
     if coll_ref and thread_id:
         try:
+            msgs_query = coll_ref.document(thread_id).collection("messages").order_by("idx").stream()
+            msgs =[m.to_dict() for m in msgs_query]
+            if msgs: return msgs
             doc = coll_ref.document(thread_id).get()
-            if doc.exists: return doc.to_dict().get("messages",[])
+            if doc.exists and "messages" in doc.to_dict():
+                return doc.to_dict().get("messages",[])
         except Exception: pass
     return get_default_greeting()
 
@@ -374,8 +393,21 @@ def save_chat_history():
 
         safe_messages.append(safe_msg)
 
-    try: coll_ref.document(st.session_state.current_thread_id).set({"messages": safe_messages, "updated_at": time.time(), "metadata": {"subjects": list(detected_subjects), "grades": list(detected_grades)}}, merge=True)
-    except Exception as e: st.toast(f"⚠️ DB Error: {e}")
+    try: 
+        thread_ref = coll_ref.document(st.session_state.current_thread_id)
+        thread_ref.set({
+            "updated_at": time.time(), 
+            "metadata": {"subjects": list(detected_subjects), "grades": list(detected_grades)}
+        }, merge=True)
+        
+        batch = db.batch()
+        for idx, s_msg in enumerate(safe_messages):
+            s_msg["idx"] = idx
+            msg_ref = thread_ref.collection("messages").document(str(idx).zfill(4))
+            batch.set(msg_ref, s_msg)
+        batch.commit()
+    except Exception as e: 
+        st.toast(f"⚠️ DB Error: {e}")
 
 # -----------------------------
 # GEMINI INIT & BULLETPROOF API ENGINE
@@ -386,7 +418,6 @@ try: client = genai.Client(api_key=api_key)
 except Exception as e: st.error(f"🚨 GenAI Error: {e}"); st.stop()
 
 def generate_with_retry(model_target, contents, config, retries=3):
-    """Bulletproof API wrapper to catch 503 Overloads and automatically retry or fallback."""
     for attempt in range(retries):
         try:
             return client.models.generate_content(model=model_target, contents=contents, config=config)
@@ -394,12 +425,11 @@ def generate_with_retry(model_target, contents, config, retries=3):
             err_str = str(e).lower()
             if "503" in err_str or "unavailable" in err_str or "overloaded" in err_str or "429" in err_str or "quota" in err_str:
                 if attempt < retries - 1:
-                    time.sleep(1.5 ** attempt) 
+                    time.sleep(1.5 ** attempt)
                     continue
-            
             try:
                 st.toast(f"⚠️ {model_target} overloaded. Switching to high-speed fallback...", icon="⚡")
-                fallback_model = "gemini-2.5-flash-lite" if "flash" in model_target else "gemini-3.1-flash-lite"
+                fallback_model = "gemini-2.5-flash-lite" if "flash" in model_target else "gemini-2.5-flash"
                 return client.models.generate_content(model=fallback_model, contents=contents, config=config)
             except Exception as fallback_e:
                 raise fallback_e
@@ -430,7 +460,7 @@ def process_visual_wrapper(vp):
 
         elif v_type == "PIE_CHART":
             try:
-                labels, sizes =[],[]
+                labels, sizes = [],[]
                 for item in str(v_data).split(","):
                     if ":" in item:
                         k, v = item.split(":", 1)
@@ -442,7 +472,7 @@ def process_visual_wrapper(vp):
                 buf = BytesIO(); fig.savefig(buf, format="png", bbox_inches="tight", transparent=True)
                 return (buf.getvalue(), "matplotlib", error_logs)
             except Exception as e: return (None, "matplotlib_failed", error_logs)
-    except Exception as e: return (None, "Crash",[str(e)])
+    except Exception as e: return (None, "Crash", [str(e)])
 
 # -----------------------------
 # PDF HELPER
@@ -458,7 +488,7 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("CustomTitle", parent=styles["Heading1"], fontSize=18, textColor=colors.HexColor("#00d4ff"), spaceAfter=12, alignment=TA_CENTER, fontName="Helvetica-Bold")
     body_style = ParagraphStyle("CustomBody", parent=styles["BodyText"], fontSize=11, spaceAfter=8, alignment=TA_LEFT, fontName="Helvetica")
-    story, img_idx, table_rows = [], 0,[]
+    story, img_idx, table_rows =[], 0,[]
 
     def render_pending_table():
         nonlocal table_rows
@@ -467,7 +497,7 @@ def create_pdf(content: str, images=None, filename="Question_Paper.pdf"):
         norm_rows = [[Paragraph(md_inline_to_rl(c), body_style) for c in list(r) + [""] * (ncols - len(r))] for r in table_rows]
         t = Table(norm_rows, colWidths=[doc.width / max(1, ncols)] * ncols)
         t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#00d4ff")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (0, 0), (-1, -1), "LEFT"), ("BOTTOMPADDING", (0, 0), (-1, 0), 8), ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8f9fa")), ("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
-        story.extend([t, Spacer(1, 0.18*inch)]); table_rows = []
+        story.extend([t, Spacer(1, 0.18*inch)]); table_rows =[]
 
     lines =[re.sub(r"\s*\(Source:.*?\)", "", l).strip() for l in str(content or "⚠️ No content").split("\n") if "[PDF_READY]" not in l.upper() and not l.strip().startswith(("Source(s):", "**Source(s):**"))]
     
@@ -523,7 +553,10 @@ def confirm_new_chat_dialog(oldest_thread_id):
     c1, c2 = st.columns(2)
     if c1.button("Cancel", use_container_width=True): st.rerun()
     if c2.button("Yes", type="primary", use_container_width=True):
-        try: get_threads_collection().document(oldest_thread_id).delete()
+        try: 
+            thread_ref = get_threads_collection().document(oldest_thread_id)
+            for m in thread_ref.collection("messages").stream(): m.reference.delete()
+            thread_ref.delete()
         except Exception: pass
         st.session_state.current_thread_id = str(uuid.uuid4()); st.session_state.messages = get_default_greeting(); st.rerun()
 
@@ -533,9 +566,13 @@ def confirm_delete_chat_dialog(thread_id_to_delete):
     c1, c2 = st.columns(2)
     if c1.button("Cancel", use_container_width=True): st.session_state.delete_requested_for = None; st.rerun()
     if c2.button("Yes", type="primary", use_container_width=True):
-        try: get_threads_collection().document(thread_id_to_delete).delete()
+        try:
+            thread_ref = get_threads_collection().document(thread_id_to_delete)
+            for m in thread_ref.collection("messages").stream(): m.reference.delete()
+            thread_ref.delete()
         except Exception: pass
-        if st.session_state.current_thread_id == thread_id_to_delete: st.session_state.current_thread_id = str(uuid.uuid4()); st.session_state.messages = get_default_greeting()
+        if st.session_state.current_thread_id == thread_id_to_delete: 
+            st.session_state.current_thread_id = str(uuid.uuid4()); st.session_state.messages = get_default_greeting()
         st.session_state.delete_requested_for = None; st.rerun()
 
 @st.dialog("⚙️ Chat Settings")
@@ -552,7 +589,7 @@ def chat_settings_dialog(thread_data):
 # 4) SIDEBAR
 # -----------------------------
 with st.sidebar:
-    if is_authenticated and user_email.lower() in[e.lower() for e in st.secrets.get("ADMIN_EMAILS",[])] and st.button("⚙️ Admin Panel"):
+    if is_authenticated and user_email.lower() in[e.lower() for e in st.secrets.get("ADMIN_EMAILS", [])] and st.button("⚙️ Admin Panel"):
         st.session_state.current_page = "admin"; st.rerun()
 
     if not is_authenticated:
@@ -577,7 +614,7 @@ with st.sidebar:
 
         if user_role == "student":
             st.markdown("<b style='color:#00d4ff'>📱 APP MODE</b>", unsafe_allow_html=True)
-            st.session_state.app_mode = st.radio("Choose Mode", ["💬 AI Tutor", "⚡ Interactive Quiz"], label_visibility="collapsed")
+            st.session_state.app_mode = st.radio("Choose Mode",["💬 AI Tutor", "⚡ Interactive Quiz"], label_visibility="collapsed")
             st.divider()
 
             if not user_profile.get("teacher_id"):
@@ -620,26 +657,16 @@ def guess_mime(filename: str, fallback: str = "application/octet-stream") -> str
 
 def is_image_mime(m: str) -> bool: return (m or "").lower().startswith("image/")
 
-
-class CachedFile:
-    def __init__(self, uri, display_name):
-        self.uri = uri
-        self.display_name = display_name
-
 @st.cache_resource(show_spinner=False)
 def upload_textbooks():
     active_files = {"sci":[], "math":[], "eng":[]}
-    
-    # 🎯 STRICT GRADE 6 FILTER: Only grabs PDFs with "cie" and "_7" in the filename
-    pdf_map = {
-        p.name.lower(): p 
-        for p in Path.cwd().rglob("*.pdf") 
-        if "cie" in p.name.lower() and "_7" in p.name.lower()
-    }
+    pdf_map = {p.name.lower(): p for p in Path.cwd().rglob("*.pdf") if "cie" in p.name.lower()}
     target_files = list(pdf_map.keys())
     
-    try: existing = {f.display_name.lower(): f for f in client.files.list() if f.display_name}
-    except Exception: existing = {}
+    try: 
+        existing = {f.display_name.lower(): f for f in client.files.list() if f.display_name}
+    except Exception: 
+        existing = {}
     
     with st.chat_message("assistant"): st.markdown(f"""<div class="thinking-container"><span class="thinking-text">📚 Synchronizing {len(target_files)} Textbooks...</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
     
@@ -676,14 +703,13 @@ def select_relevant_books(query, file_dict, user_grade="Grade 6"):
         if subj_match and grade_match:
             q_subj = "math" if subj_match.group(1) == "Math" else "sci" if subj_match.group(1) == "Science" else "eng"
             q_grade = "cie_7" if grade_match.group(1) == "Grade 6" else "cie_8" if grade_match.group(1) == "Grade 7" else "cie_9"
-            
             for b in file_dict.get(q_subj,[]):
                 n = b.display_name.lower()
                 if q_grade in n and "answers" not in n:
-                    return [b] 
+                    return [b]
 
     qn = normalize_stage_text(query)
-    s7 = any(k in qn for k in["stage 7", "grade 6", "year 7"])
+    s7 = any(k in qn for k in ["stage 7", "grade 6", "year 7"])
     s8 = any(k in qn for k in["stage 8", "grade 7", "year 8"])
     s9 = any(k in qn for k in["stage 9", "grade 8", "year 9"])
     
@@ -707,13 +733,13 @@ def select_relevant_books(query, file_dict, user_grade="Grade 6"):
                 if (s7 and "cie_7" in n) or (s8 and "cie_8" in n) or (s9 and "cie_9" in n): 
                     sel.append(b)
                     break 
+    
     add("math", im); add("sci", isc); add("eng", ien)
-    return sel[:2] 
+    return sel[:2]
 
 # ==========================================
-# APP ROUTING
+# APP ROUTING: TEACHER DASHBOARD
 # ==========================================
-app_mode = st.session_state.get("app_mode", "💬 AI Tutor")
 render_chat_interface = False 
 
 if user_role == "teacher":
@@ -730,8 +756,8 @@ if user_role == "teacher":
         st.subheader("🏫 Class Management")
         with st.form("create_class_form", clear_on_submit=True):
             cc1, cc2, cc3 = st.columns([0.4, 0.3, 0.3])
-            grade_choice = cc1.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"])
-            section_choice = cc2.selectbox("Section",["A", "B", "C", "D"])
+            grade_choice = cc1.selectbox("Grade", ["Grade 6", "Grade 7", "Grade 8"])
+            section_choice = cc2.selectbox("Section", ["A", "B", "C", "D"])
             if cc3.form_submit_button("Create", use_container_width=True):
                 success, msg = create_global_class(f"{grade_choice.split()[-1]}{section_choice}".upper(), user_email, grade_choice, section_choice, user_school)
                 if success: st.success(msg); time.sleep(1); st.rerun()
@@ -760,7 +786,7 @@ if user_role == "teacher":
         if st.button("🤖 Generate with Helix AI", type="primary", use_container_width=True):
             with st.spinner("Writing paper..."):
                 books = select_relevant_books(f"{assign_subject} {assign_grade}", st.session_state.textbook_handles, assign_grade)
-                parts =[]
+                parts = []
                 for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
                 
                 parts.append(types.Part.from_text(text=f"Task: Generate a CIE {assign_subject} paper for {assign_grade} students.\nDifficulty: {assign_difficulty}. Marks: {assign_marks}.\nExtra Instructions: {assign_extra}"))
@@ -773,7 +799,7 @@ if user_role == "teacher":
                     )
                     gen_paper = safe_response_text(resp)
                     
-                    draft_imgs, draft_mods = [],[]
+                    draft_imgs, draft_mods =[],[]
                     if v_prompts := re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", gen_paper):
                         with concurrent.futures.ThreadPoolExecutor(5) as exe:
                             for r in exe.map(process_visual_wrapper, v_prompts):
@@ -794,21 +820,22 @@ if user_role == "teacher":
 
     elif teacher_menu == "AI Chat": render_chat_interface = True 
 
-elif app_mode == "⚡ Interactive Quiz":
-    render_chat_interface = False
+else:
+    app_mode = st.session_state.get("app_mode", "💬 AI Tutor")
     
-    # --- QUIZ SETUP SCREEN ---
-    if not st.session_state.get("quiz_active", False):
-        st.markdown("<br><br>", unsafe_allow_html=True) # Vertical centering
-        with st.container(border=False):
+    if app_mode == "⚡ Interactive Quiz":
+        render_chat_interface = False
+        
+        if not st.session_state.get("quiz_active", False):
+            st.markdown("<br><br>", unsafe_allow_html=True) 
             st.markdown("<div class='quiz-title'>⚙️ Configure Your Quiz</div>", unsafe_allow_html=True)
             with st.form("quick_quiz_form", border=False):
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)
-                    q_subj = c1.selectbox("Subject",["Math", "Science", "English"])
+                    q_subj = c1.selectbox("Subject", ["Math", "Science", "English"])
                     current_active_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
                     q_grade = c2.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"], index=["Grade 6", "Grade 7", "Grade 8"].index(current_active_grade))
-                    q_diff = c3.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
+                    q_diff = c3.selectbox("Difficulty",["Easy", "Medium", "Hard"])
                     
                     c4, c5 = st.columns([3, 1])
                     q_chap = c4.text_input("Chapter / Topic", placeholder="e.g. Chapter 4, Fractions, Forces...")
@@ -817,104 +844,12 @@ elif app_mode == "⚡ Interactive Quiz":
                     if st.form_submit_button("🚀 Start Interactive Quiz", type="primary", use_container_width=True):
                         st.session_state.generating_quiz = True
                         st.session_state.quiz_params = {"subj": q_subj, "grade": q_grade, "diff": q_diff, "chap": q_chap, "num": q_num}
+                        
+                        quiz_prompt = f"QUIZ_REQUEST: Create a {q_diff} {q_subj} quiz for {q_grade}.\nTopic: {q_chap}\nNumber of Questions: {q_num}.\nStart by giving me Question 1 only."
+                        st.session_state.messages.append({"role": "user", "content": quiz_prompt})
+                        st.session_state.quiz_active = True
                         st.rerun()
 
-    # --- QUIZ GENERATION LOGIC ---
-    if st.session_state.get("generating_quiz"):
-        with st.spinner("Generating Lightning Quiz..."):
-            try:
-                p = st.session_state.quiz_params
-                books = select_relevant_books(f"QUIZ_REQUEST: Subject: {p['subj']}, Grade: {p['grade']}", st.session_state.textbook_handles, p['grade'])
-                
-                parts =[]
-                if books:
-                    for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
-                
-                prompt = f"""
-                Generate a fast {p['num']}-question quiz for {p['grade']} {p['subj']} on the topic: '{p['chap']}'. Difficulty: {p['diff']}.
-                Based ONLY on the attached textbooks.
-                CRITICAL FOR SPEED: Keep 'explanation' extremely short (1 short sentence max).
-                Output EXACTLY a JSON array of objects. Do not include markdown. Just the raw array.
-                Format:[
-                    {{ "type": "mcq", "question": "...", "options": ["A", "B", "C", "D"], "answer": "...", "explanation": "..." }},
-                    {{ "type": "short_answer", "question": "...", "answer": "...", "explanation": "..." }}
-                ]
-                """
-                parts.append(types.Part.from_text(text=prompt))
-                
-                resp = generate_with_retry(
-                    model_target="gemini-2.5-flash", 
-                    contents=parts, 
-                    config=types.GenerateContentConfig(temperature=0.2, response_mime_type="application/json")
-                )
-                
-                quiz_data = json.loads(safe_response_text(resp))
-                st.session_state.quiz_data = quiz_data
-                st.session_state.quiz_idx = 0
-                st.session_state.quiz_score = 0
-                st.session_state.quiz_state = "answering"
-                st.session_state.quiz_bg = "default"
-                st.session_state.quiz_active = True
-                st.session_state.generating_quiz = False
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to generate quiz: {e}")
-                st.session_state.generating_quiz = False
-
-    # --- QUIZ INTERFACE (LIQUID GLASS) ---
-    if st.session_state.get("quiz_active") and "quiz_data" in st.session_state:
-        q_idx = st.session_state.quiz_idx
-        q_data = st.session_state.quiz_data
-        
-        if q_idx < len(q_data):
-            current_q = q_data[q_idx]
-            
-            with st.container(border=True):
-                st.markdown(f"<div style='opacity:0.7; font-weight:600; margin-bottom:10px;'>Question {q_idx + 1} of {len(q_data)}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='quiz-title'>{current_q['question']}</div>", unsafe_allow_html=True)
-                
-                if st.session_state.quiz_state == "answering":
-                    if current_q["type"] == "mcq":
-                        for opt in current_q["options"]:
-                            if st.button(opt, use_container_width=True, key=f"opt_{q_idx}_{opt}"):
-                                st.session_state.quiz_state = "feedback"
-                                if opt == current_q["answer"]:
-                                    st.session_state.quiz_bg, st.session_state.quiz_score, st.session_state.quiz_feedback = "correct", st.session_state.quiz_score + 1, f"✅ **Correct!**\n\n{current_q.get('explanation', '')}"
-                                else:
-                                    st.session_state.quiz_bg, st.session_state.quiz_feedback = "wrong", f"❌ **Incorrect.** The right answer was **{current_q['answer']}**.\n\n{current_q.get('explanation', '')}"
-                                st.rerun()
-                                
-                    elif current_q["type"] == "short_answer":
-                        user_ans = st.text_area("Your Answer:")
-                        if st.button("Submit Answer", type="primary"):
-                            with st.spinner("Grading..."):
-                                eval_prompt = f"Student answered: {user_ans}\nExpected answer: {current_q['answer']}\nIs the student correct? Respond in strict JSON: {{\"status\": \"correct\"|\"partially_correct\"|\"wrong\", \"feedback\": \"Short feedback. Max 10 words.\"}}"
-                                try:
-                                    eval_resp = generate_with_retry(
-                                        model_target="gemini-2.5-flash", 
-                                        contents=[eval_prompt], 
-                                        config=types.GenerateContentConfig(temperature=0.1, response_mime_type="application/json")
-                                    )
-                                    eval_data = json.loads(safe_response_text(eval_resp))
-                                    
-                                    st.session_state.quiz_state = "feedback"
-                                    if eval_data["status"] == "wrong":
-                                        st.session_state.quiz_bg, st.session_state.quiz_feedback = "wrong", f"❌ **Incorrect.**\n\n{eval_data['feedback']}"
-                                    else:
-                                        st.session_state.quiz_bg, st.session_state.quiz_score = "correct", st.session_state.quiz_score + 1
-                                        st.session_state.quiz_feedback = f"{'✅' if eval_data['status'] == 'correct' else '⚠️'} **{eval_data['status'].replace('_', ' ').title()}!**\n\n{eval_data['feedback']}"
-                                    st.rerun()
-                                except Exception as e: st.error(f"Grading Error: {e}")
-                elif st.session_state.quiz_state == "feedback":
-                    st.info(st.session_state.quiz_feedback)
-                    if st.button("Next Question ➡️", use_container_width=True, type="primary"):
-                        st.session_state.quiz_idx += 1; st.session_state.quiz_state = "answering"; st.session_state.quiz_bg = "default"; st.rerun()
-        else:
-            st.session_state.quiz_bg = "default"
-            with st.container(border=True):
-                st.markdown(f"<h2 style='text-align:center;'>🎉 Quiz Complete!</h2><h3 style='text-align:center;'>You scored {st.session_state.quiz_score} out of {len(q_data)}</h3>", unsafe_allow_html=True)
-                if st.button("Finish & Return", type="primary", use_container_width=True):
-                    st.session_state.quiz_active = False; del st.session_state.quiz_data; st.rerun()
     else:
         render_chat_interface = True
         st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
@@ -923,10 +858,11 @@ elif app_mode == "⚡ Interactive Quiz":
 # ==========================================
 # UNIVERSAL CHAT VIEW 
 # ==========================================
-if render_chat_interface:
+if render_chat_interface or st.session_state.get("quiz_active", False):
     for idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             disp = msg.get("content") or ""
+            
             if disp.startswith("QUIZ_REQUEST:"):
                 st.markdown(f"**⚡ Quiz Requested:** {disp.split('.\n\n')[0].replace('QUIZ_REQUEST: ', '')}")
             else:
@@ -934,9 +870,23 @@ if render_chat_interface:
                 disp = re.sub(r"===ANALYTICS_START===.*?===ANALYTICS_END===", "", disp, flags=re.IGNORECASE|re.DOTALL)
                 disp = re.sub(r"```json\s*\{[^{]*?\"weak_point\".*?\}\s*```", "", disp, flags=re.IGNORECASE|re.DOTALL)
                 disp = re.sub(r"\{[^{]*?\"weak_point\".*?\}", "", disp, flags=re.IGNORECASE|re.DOTALL)
-                st.markdown(re.sub(r"\[PDF_READY\]", "", disp, flags=re.IGNORECASE).strip())
+                
+                # Check if this AI message has MCQ buttons generated dynamically 
+                options = re.findall(r"^[A-D]\).*$", disp, re.MULTILINE)
+                if options and msg["role"] == "assistant" and idx == len(st.session_state.messages) - 1:
+                    # Strip options from the display text to render them purely as st.buttons
+                    clean_disp = re.sub(r"^[A-D]\).*$", "", disp, flags=re.MULTILINE).strip()
+                    st.markdown(re.sub(r"\[PDF_READY\]", "", clean_disp, flags=re.IGNORECASE).strip())
+                    
+                    # Render the beautiful buttons you created!
+                    for opt in options:
+                        if st.button(opt.strip(), use_container_width=True, key=f"btn_{idx}_{opt}"):
+                            st.session_state.messages.append({"role": "user", "content": opt.strip()})
+                            st.rerun()
+                else:
+                    st.markdown(re.sub(r"\[PDF_READY\]", "", disp, flags=re.IGNORECASE).strip())
             
-            for img, mod in zip(msg.get("images") or[], msg.get("image_models",["Unknown"]*10)):
+            for img, mod in zip(msg.get("images") or[], msg.get("image_models", ["Unknown"]*10)):
                 if img: st.image(img, use_container_width=True, caption=f"✨ Generated by helix.ai ({mod})")
             for b64, mod in zip(msg.get("db_images") or[], msg.get("image_models", ["Unknown"]*10)):
                 if b64:
@@ -952,7 +902,7 @@ if render_chat_interface:
             elif msg.get("user_attachment_name"): st.caption(f"📎 Attached: {msg.get('user_attachment_name', 'File')}")
 
             if msg["role"] == "assistant" and msg.get("is_downloadable"):
-                try: st.download_button("📄 Download PDF", data=create_pdf(msg.get("content") or "", msg.get("images") or[base64.b64decode(b) for b in msg.get("db_images",[]) if b]), file_name=f"Paper_{idx}.pdf", mime="application/pdf", key=f"dl_{idx}")
+                try: st.download_button("📄 Download PDF", data=create_pdf(msg.get("content") or "", msg.get("images") or[base64.b64decode(b) for b in msg.get("db_images", []) if b]), file_name=f"Paper_{idx}.pdf", mime="application/pdf", key=f"dl_{idx}")
                 except Exception as e: st.error(f"PDF Error: {e}")
 
     if chat_input := st.chat_input("Ask Helix...", accept_file=True, file_type=["jpg","png","pdf","txt"]):
@@ -983,7 +933,7 @@ if render_chat_interface:
 
                 curr_parts =[]
                 student_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
-                books = select_relevant_books(" ".join([m.get("content","") for m in st.session_state.messages[-3:]]), st.session_state.textbook_handles, student_grade)
+                books = select_relevant_books(" ".join([m.get("content", "") for m in st.session_state.messages[-3:]]), st.session_state.textbook_handles, student_grade)
                 
                 if books:
                     for b in books: 
@@ -1010,7 +960,8 @@ if render_chat_interface:
                 if match_full:
                     try:
                         ad = json.loads(match_full.group(1))
-                        bot_txt = bot_txt.replace(match_full.group(0), "").strip()
+                        start_idx = match_full.start()
+                        bot_txt = bot_txt[:start_idx].strip()
                         bot_txt = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*$", "", bot_txt).strip()
                         
                         if is_authenticated and db: db.collection("users").document(user_email).collection("analytics").add({"timestamp": time.time(), **ad})
