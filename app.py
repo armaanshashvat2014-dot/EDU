@@ -399,7 +399,7 @@ def generate_with_retry(model_target, contents, config, retries=3):
             
             try:
                 st.toast(f"⚠️ {model_target} overloaded. Switching to high-speed fallback...", icon="⚡")
-                fallback_model = "gemini-2.5-flash-lite" if "flash" in model_target else "gemini-2.5-flash"
+                fallback_model = "gemini-2.5-flash-lite" if "flash" in model_target else "gemini-3.1-flash-lite"
                 return client.models.generate_content(model=fallback_model, contents=contents, config=config)
             except Exception as fallback_e:
                 raise fallback_e
