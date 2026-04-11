@@ -106,11 +106,16 @@ When evaluating a student's typed chat answer, you MUST act as a supportive huma
 """
 
 QUIZ_SYSTEM_INSTRUCTION = f"""
-You are an AI Quiz Engine. Your ONLY job is to output a single, raw JSON array of objects based on the user's request. NEVER output conversational text or markdown formatting. 
+You are an AI Quiz Engine. Your ONLY job is to output a single, raw JSON array of objects. NEVER output conversational text or markdown formatting. 
 
 ### ANTI-PLAGIARISM & RANDOMIZATION (CRITICAL)
 - STRICTLY FORBIDDEN to copy-paste or rephrase questions directly from the provided textbooks. Textbooks are for INSPIRATION ONLY.
 - Generate 100% NEW, UNIQUE, and highly randomized questions. 
+
+### STRICT SYLLABUS BOUNDARIES (CRITICAL)
+- "Hard" difficulty means creating complex, multi-step scenarios using ONLY the concepts present in the provided text.
+- You are STRICTLY FORBIDDEN from introducing any terminology, formulas, or concepts not explicitly stated in the provided textbook extract.
+- Example: If the text ONLY discusses series circuits and ammeters, you MUST NOT ask about parallel circuits or volts, even for a "hard" question.
 
 The JSON MUST be a valid ARRAY of objects. Each object MUST have this exact structure:
 {{
@@ -782,62 +787,7 @@ def render_quiz_engine():
                             else:
                                 st.error("Invalid ShareCode. Please check the code and try again.")
     else:
-        # ACTIVE QUIZ
-        q_list = st.session_state.get("quiz_questions",[])
-        q_idx = st.session_state.get("quiz_current_q", 1) - 1
-        if q_idx < len(q_list):
-            q_data = q_list[q_idx]
-            q_params = st.session_state.get("quiz_params", {})
-            
-            with st.container(border=True):
-                st.markdown(f"<div class='quiz-counter'>Question {q_idx + 1} of {len(q_list)}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='quiz-question-text'>{q_data.get('question', 'Question text missing')}</div>", unsafe_allow_html=True)
-
-                if st.session_state.get("quiz_user_answer") is None:
-                    if q_data.get("type", "MCQ") == "MCQ":
-                        for option in q_data.get('options',[]):
-                            if st.button(option, use_container_width=True, key=f"q_opt_{option}"):
-                                st.session_state.quiz_user_answer = option; st.rerun()
-                    else:
-                        user_sa = st.text_area("Your Answer:")
-                        if st.button("Submit Answer", type="primary"):
-                            with st.spinner("Evaluating..."):
-                                eval_res = evaluate_short_answer(q_data.get("question"), user_sa, q_data.get("correct_answer"))
-                                st.session_state.quiz_sa_eval = eval_res
-                            st.session_state.quiz_user_answer = user_sa; st.rerun()
-                else:
-                    user_ans = st.session_state.get("quiz_user_answer")
-                    
-                    if q_data.get("type", "MCQ") == "MCQ":
-                        is_correct = (user_ans == q_data.get('correct_answer'))
-                        explanation = q_data.get('explanation', '')
-                    else:
-                        eval_res = st.session_state.get("quiz_sa_eval", {})
-                        is_correct = eval_res.get("is_correct", False)
-                        explanation = eval_res.get("explanation", "Evaluated by AI.")
-
-                    if is_correct:
-                        st.success(f"**Correct!** {explanation}")
-                        if st.session_state.get("quiz_bg") != "correct":
-                            st.session_state.quiz_score += 1
-                            st.session_state.quiz_bg = "correct"; st.rerun()
-                    else:
-                        if q_data.get("type", "MCQ") == "MCQ": st.error(f"**Incorrect.** The correct answer was **{q_data.get('correct_answer')}**. \n\n*Explanation: {explanation}*")
-                        else: st.error(f"**Incorrect.** \n\n*Feedback: {explanation}*")
-                        if st.session_state.get("quiz_bg") != "wrong":
-                            st.session_state.quiz_bg = "wrong"; st.rerun()
-                            
-                    if len(st.session_state.get("quiz_history",[])) < st.session_state.get("quiz_current_q"):
-                        st.session_state.quiz_history.append({"q": q_data.get('question'), "user": user_ans, "correct": q_data.get('correct_answer'), "is_correct": is_correct})
-                        if len(st.session_state.quiz_history) % 5 == 0: run_quiz_weakpoint_check(st.session_state.quiz_history[-5:], user_email, q_params.get('subj', 'General'))
-
-                    is_last_q = (st.session_state.get("quiz_current_q") == len(q_list))
-                    if st.button("Next Question" if not is_last_q else "Finish Quiz", type="primary", use_container_width=True):
-                        if is_last_q: st.session_state.quiz_finished = True
-                        else: st.session_state.quiz_current_q += 1
-                        st.session_state.quiz_user_answer = None 
-                        st.session_state.quiz_bg = "default"; st.rerun()
-
+        
         if st.session_state.get("quiz_finished"):
             score, total = st.session_state.get("quiz_score"), len(st.session_state.get("quiz_questions",[]))
             if not st.session_state.get("quiz_saved") and is_authenticated and db:
@@ -845,14 +795,95 @@ def render_quiz_engine():
                 st.session_state.quiz_saved = True
                 
             st.balloons()
-            st.success(f"## 🎉 Quiz Complete! 🎉 \n\n### You scored: {score} / {total}")
-            if st.session_state.get("quiz_share_code"):
-                st.info(f"Challenge friends with ShareCode: **{st.session_state.get('quiz_share_code')}**")
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown("<div class='glass-container' style='text-align:center;'>", unsafe_allow_html=True)
+                st.markdown(f"<h1 style='color:#2ecc71;'>🎉 Quiz Complete! 🎉</h1>", unsafe_allow_html=True)
+                st.markdown(f"<h2>You scored: <span style='color:#00d4ff;'>{score} / {total}</span></h2>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
                 
-            if st.button("Take Another Quiz", use_container_width=True):
-                for key in list(st.session_state.keys()):
-                    if key.startswith('quiz_'): del st.session_state[key]
-                st.rerun()
+                if st.session_state.get("quiz_share_code"):
+                    st.info(f"Challenge friends with ShareCode: **{st.session_state.get('quiz_share_code')}**")
+                    
+                if st.button("Take Another Quiz", type="primary", use_container_width=True):
+                    for key in list(st.session_state.keys()):
+                        if key.startswith('quiz_'): del st.session_state[key]
+                    st.rerun()
+
+        elif st.session_state.get("quiz_active"):
+            if "quiz_current_q_data" not in st.session_state:
+                with st.spinner("Generating next question..."):
+                    p = st.session_state.get("quiz_params")
+                    prompt = f"Create a {p['diff']} multiple-choice question for a {p['grade']} {p['subj']} student. Topic: {p['chap']}. Provide 4 options."
+                    books = select_relevant_books(f"{p['subj']} {p['grade']}", st.session_state.get("textbook_handles", {}), p['grade'])
+                    parts =[]
+                    for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
+                    parts.append(prompt)
+                    response = generate_with_retry("gemini-2.5-pro", parts, types.GenerateContentConfig(system_instruction=QUIZ_SYSTEM_INSTRUCTION, temperature=0.3))
+                    try:
+                        json_str = re.search(r'\{.*\}', safe_response_text(response), re.DOTALL).group(0)
+                        st.session_state.quiz_current_q_data = json.loads(json_str)
+                        st.session_state.quiz_user_answer = None 
+                        st.session_state.quiz_bg = "default"
+                        st.rerun()
+                    except Exception as e:
+                        st.error("Failed to generate a valid quiz question. Please try again.")
+                        st.button("Try Again", on_click=lambda: st.session_state.pop("quiz_current_q_data", None))
+
+            if "quiz_current_q_data" in st.session_state:
+                q_list = st.session_state.get("quiz_questions",[])
+                q_idx = st.session_state.get("quiz_current_q", 1) - 1
+                q_data = q_list[q_idx]
+                q_params = st.session_state.get("quiz_params", {})
+                
+                with st.container(border=True):
+                    st.markdown(f"<div class='quiz-counter'>Question {q_idx + 1} of {len(q_list)}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='quiz-question-text'>{q_data.get('question', 'Question text missing')}</div>", unsafe_allow_html=True)
+
+                    if st.session_state.get("quiz_user_answer") is None:
+                        if q_data.get("type", "MCQ") == "MCQ":
+                            for option in q_data.get('options',[]):
+                                if st.button(option, use_container_width=True, key=f"q_opt_{option}"):
+                                    st.session_state.quiz_user_answer = option; st.rerun()
+                        else:
+                            user_sa = st.text_area("Your Answer:")
+                            if st.button("Submit Answer", type="primary"):
+                                with st.spinner("Evaluating..."):
+                                    eval_res = evaluate_short_answer(q_data.get("question"), user_sa, q_data.get("correct_answer"))
+                                    st.session_state.quiz_sa_eval = eval_res
+                                st.session_state.quiz_user_answer = user_sa; st.rerun()
+                    else:
+                        user_ans = st.session_state.get("quiz_user_answer")
+                        
+                        if q_data.get("type", "MCQ") == "MCQ":
+                            is_correct = (user_ans == q_data.get('correct_answer'))
+                            explanation = q_data.get('explanation', '')
+                        else:
+                            eval_res = st.session_state.get("quiz_sa_eval", {})
+                            is_correct = eval_res.get("is_correct", False)
+                            explanation = eval_res.get("explanation", "Evaluated by AI.")
+
+                        if is_correct:
+                            st.success(f"**Correct!** {explanation}")
+                            if st.session_state.get("quiz_bg") != "correct":
+                                st.session_state.quiz_score += 1
+                                st.session_state.quiz_bg = "correct"; st.rerun()
+                        else:
+                            if q_data.get("type", "MCQ") == "MCQ": st.error(f"**Incorrect.** The correct answer was **{q_data.get('correct_answer')}**. \n\n*Explanation: {explanation}*")
+                            else: st.error(f"**Incorrect.** \n\n*Feedback: {explanation}*")
+                            if st.session_state.get("quiz_bg") != "wrong":
+                                st.session_state.quiz_bg = "wrong"; st.rerun()
+                                
+                        if len(st.session_state.get("quiz_history",[])) < st.session_state.get("quiz_current_q"):
+                            st.session_state.quiz_history.append({"q": q_data.get('question'), "user": user_ans, "correct": q_data.get('correct_answer'), "is_correct": is_correct})
+                            if len(st.session_state.quiz_history) % 5 == 0: run_quiz_weakpoint_check(st.session_state.quiz_history[-5:], user_email, q_params.get('subj', 'General'))
+
+                        is_last_q = (st.session_state.get("quiz_current_q") == len(q_list))
+                        if st.button("Next Question" if not is_last_q else "Finish Quiz", type="primary", use_container_width=True):
+                            if is_last_q: st.session_state.quiz_finished = True
+                            else: st.session_state.quiz_current_q += 1
+                            st.session_state.quiz_user_answer = None 
+                            st.session_state.quiz_bg = "default"; st.rerun()
 
 # ==========================================
 # APP ROUTER
