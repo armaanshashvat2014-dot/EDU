@@ -108,7 +108,7 @@ When evaluating a student's typed chat answer, you MUST act as a supportive huma
 """
 
 QUIZ_SYSTEM_INSTRUCTION = f"""
-You are an AI Quiz Engine. Your ONLY job is to output a single, raw JSON array of objects. NEVER output conversational text or markdown formatting. 
+You are an AI Quiz Engine. Your ONLY job is to output a single, raw JSON array of objects based on the user's request. NEVER output conversational text or markdown formatting. 
 
 ### ANTI-PLAGIARISM & RANDOMIZATION (CRITICAL)
 - STRICTLY FORBIDDEN to copy-paste or rephrase questions directly from the provided textbooks. Textbooks are for INSPIRATION ONLY.
@@ -232,7 +232,7 @@ def evaluate_weak_spots(_email):
         1. Group the raw remarks by semantic similarity.
         2. If ANY group has 3 or more remarks, it is a "Potential Weak Spot".
         3. Output ONLY a JSON array of NEW distinct weak spot objects. You MUST identify the subject based on the raw remarks.
-        Format Example:[{{"subject": "Math", "topic": "Fractions"}}]
+        Format Example: [{{"subject": "Math", "topic": "Fractions"}}]
         """
         try:
             resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt, config=types.GenerateContentConfig(temperature=0.1))
@@ -257,9 +257,6 @@ def run_quiz_weakpoint_check(history, email, subject):
                 db.collection("users").document(email).collection("analytics").add({"timestamp": time.time(), "subject": subject, "weak_point": data["weak_point"], "source": "quiz"})
     except Exception: pass
 
-# -----------------------------
-# THREAD HELPERS
-# -----------------------------
 def get_threads_collection(): return db.collection("users").document(auth_object.email).collection("threads") if is_authenticated and db else None
 def get_all_threads():
     coll_ref = get_threads_collection()
@@ -330,9 +327,6 @@ def save_chat_history():
         batch.commit()
     except Exception as e: st.toast(f"⚠️ DB Error: {e}")
 
-# -----------------------------
-# GEMINI INIT
-# -----------------------------
 api_key = os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 if not api_key: st.error("🚨 GOOGLE_API_KEY not found."); st.stop()
 try: client = genai.Client(api_key=api_key)
@@ -440,7 +434,7 @@ def generate_chat_title(client, messages):
         if not user_msgs: return "New Chat"
         response = generate_with_retry(model_target="gemini-2.5-flash", contents=["Summarize this into a short chat title (max 4 words). Context: " + "\n".join(user_msgs[-3:])], config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=50))
         return safe_response_text(response).strip().replace('"', '').replace("'", "") or "New Chat"
-    except Exception: return "New Chat"
+    except Exception as e: st.toast(f"Title Gen Failed: {e}"); return "New Chat"
 
 # -----------------------------
 # 3) DIALOGS & SESSION INIT
@@ -595,14 +589,29 @@ def guess_mime(filename: str, fallback: str = "application/octet-stream") -> str
     return "image/jpeg" if n.endswith((".jpg", ".jpeg")) else "image/png" if n.endswith(".png") else "application/pdf" if n.endswith(".pdf") else fallback
 def is_image_mime(m: str) -> bool: return (m or "").lower().startswith("image/")
 
-@st.cache_resource(show_spinner=False)
-def upload_textbooks():
+def sync_textbooks():
     active_files = {"sci":[], "math": [], "eng":[]}
     pdf_map = {p.name.lower(): p for p in Path.cwd().rglob("*.pdf") if "cie" in p.name.lower()}
-    target_files = list(pdf_map.keys())
+    
+    # Check cache first
+    cache_file = "fast_sync_cache.json"
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                cached_data = json.load(f)
+            # Expire after 24 hours (86400 seconds) to be safe
+            if time.time() - cached_data.get("timestamp", 0) < 86400:
+                class CachedFile:
+                    def __init__(self, d): self.uri = d["uri"]; self.display_name = d["display_name"]
+                for subj, files in cached_data["files"].items():
+                    for item in files: active_files[subj].append(CachedFile(item))
+                return active_files
+        except Exception: pass
+    
+    # Actual sync logic
     try: existing = {f.display_name.lower(): f for f in client.files.list() if f.display_name}
     except Exception: existing = {}
-    with st.chat_message("assistant"): st.markdown(f"""<div class="thinking-container"><span class="thinking-text">📚 Synchronizing {len(target_files)} Textbooks...</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
+    
     def process_single_book(t):
         if t in existing and existing[t].state.name == "ACTIVE": return t, existing[t]
         if t in pdf_map:
@@ -613,17 +622,27 @@ def upload_textbooks():
                 if up.state.name == "ACTIVE": return t, up
             except Exception as e: print(f"Upload Error {t}: {e}")
         return t, None
+        
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        results = list(executor.map(process_single_book, target_files))
+        results = list(executor.map(process_single_book, list(pdf_map.keys())))
+        
+    cache_dict = {"sci": [], "math": [], "eng":[]}
     for t, file_obj in results:
         if file_obj:
-            if "sci" in t: active_files["sci"].append(file_obj)
-            elif "math" in t: active_files["math"].append(file_obj)
-            elif "eng" in t: active_files["eng"].append(file_obj)
+            subj_key = "sci" if "sci" in t else "math" if "math" in t else "eng" if "eng" in t else None
+            if subj_key:
+                active_files[subj_key].append(file_obj)
+                cache_dict[subj_key].append({"uri": file_obj.uri, "display_name": file_obj.display_name})
+                
+    try:
+        with open(cache_file, "w") as f: json.dump({"timestamp": time.time(), "files": cache_dict}, f)
+    except Exception: pass
+    
     return active_files
 
 if is_authenticated and "textbook_handles" not in st.session_state:
-    with st.spinner("Preparing curriculum..."): st.session_state.textbook_handles = upload_textbooks()
+    with st.spinner("Syncing Curriculum (This will be instant next time)..."):
+        st.session_state.textbook_handles = sync_textbooks()
 
 def select_relevant_books(query, file_dict, user_grade="Grade 6"):
     qn = normalize_stage_text(query)
@@ -785,7 +804,10 @@ def render_quiz_engine():
                             else:
                                 st.error("Invalid ShareCode. Please check the code and try again.")
     else:
-        # FINISHED STATE
+        # ACTIVE OR FINISHED QUIZ STATE
+        q_list = st.session_state.get("quiz_questions",[])
+        q_idx = st.session_state.get("quiz_current_q", 1) - 1
+        
         if st.session_state.get("quiz_finished"):
             score, total = st.session_state.get("quiz_score"), len(st.session_state.get("quiz_questions",[]))
             if not st.session_state.get("quiz_saved") and is_authenticated and db:
@@ -808,98 +830,98 @@ def render_quiz_engine():
                         if key.startswith('quiz_'): del st.session_state[key]
                     st.rerun()
                     
-        # ACTIVE QUESTION STATE
-        elif st.session_state.get("quiz_active"):
-            q_list = st.session_state.get("quiz_questions",[])
-            q_idx = st.session_state.get("quiz_current_q", 1) - 1
-            if q_idx < len(q_list):
-                q_data = q_list[q_idx]
-                q_params = st.session_state.get("quiz_params", {})
-                
-                with st.container(border=True):
-                    st.markdown(f"<div class='quiz-counter'>Question {q_idx + 1} of {len(q_list)}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='quiz-question-text'>{q_data.get('question', 'Question text missing')}</div>", unsafe_allow_html=True)
+        elif q_idx < len(q_list):
+            q_data = q_list[q_idx]
+            q_params = st.session_state.get("quiz_params", {})
+            
+            with st.container(border=True):
+                st.markdown(f"<div class='quiz-counter'>Question {q_idx + 1} of {len(q_list)}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='quiz-question-text'>{q_data.get('question', 'Question text missing')}</div>", unsafe_allow_html=True)
 
-                    if st.session_state.get("quiz_user_answer") is None:
-                        if q_data.get("type", "MCQ") == "MCQ":
-                            for o_idx, option in enumerate(q_data.get('options',[])):
-                                # 🎯 FIX: Key is now guaranteed to be unique
-                                if st.button(option, use_container_width=True, key=f"q{q_idx}_opt_{o_idx}"):
-                                    st.session_state.quiz_user_answer = option; st.rerun()
-                        else:
-                            user_sa = st.text_area("Your Answer:")
-                            if st.button("Submit Answer", type="primary"):
-                                with st.spinner("Evaluating..."):
-                                    eval_res = evaluate_short_answer(q_data.get("question"), user_sa, q_data.get("correct_answer"))
-                                    st.session_state.quiz_sa_eval = eval_res
-                                st.session_state.quiz_user_answer = user_sa; st.rerun()
+                if st.session_state.get("quiz_user_answer") is None:
+                    if q_data.get("type", "MCQ") == "MCQ":
+                        for o_idx, option in enumerate(q_data.get('options',[])):
+                            if st.button(option, use_container_width=True, key=f"q{q_idx}_opt_{o_idx}"):
+                                st.session_state.quiz_user_answer = option; st.rerun()
                     else:
-                        user_ans = st.session_state.get("quiz_user_answer")
-                        
-                        if q_data.get("type", "MCQ") == "MCQ":
-                            is_correct = (user_ans == q_data.get('correct_answer'))
-                            explanation = q_data.get('explanation', '')
-                        else:
-                            eval_res = st.session_state.get("quiz_sa_eval", {})
-                            is_correct = eval_res.get("is_correct", False)
-                            explanation = eval_res.get("explanation", "Evaluated by AI.")
+                        user_sa = st.text_area("Your Answer:")
+                        if st.button("Submit Answer", type="primary"):
+                            with st.spinner("Evaluating..."):
+                                eval_res = evaluate_short_answer(q_data.get("question"), user_sa, q_data.get("correct_answer"))
+                                st.session_state.quiz_sa_eval = eval_res
+                            st.session_state.quiz_user_answer = user_sa; st.rerun()
+                else:
+                    user_ans = st.session_state.get("quiz_user_answer")
+                    
+                    if q_data.get("type", "MCQ") == "MCQ":
+                        is_correct = (user_ans == q_data.get('correct_answer'))
+                        explanation = q_data.get('explanation', '')
+                    else:
+                        eval_res = st.session_state.get("quiz_sa_eval", {})
+                        is_correct = eval_res.get("is_correct", False)
+                        explanation = eval_res.get("explanation", "Evaluated by AI.")
 
-                        if is_correct:
-                            st.success(f"**Correct!** {explanation}")
-                            if st.session_state.get("quiz_bg") != "correct":
-                                st.session_state.quiz_score += 1
-                                st.session_state.quiz_bg = "correct"; st.rerun()
-                        else:
-                            if q_data.get("type", "MCQ") == "MCQ": st.error(f"**Incorrect.** The correct answer was **{q_data.get('correct_answer')}**. \n\n*Explanation: {explanation}*")
-                            else: st.error(f"**Incorrect.** \n\n*Feedback: {explanation}*")
-                            if st.session_state.get("quiz_bg") != "wrong":
-                                st.session_state.quiz_bg = "wrong"; st.rerun()
-                                
-                        if len(st.session_state.get("quiz_history",[])) < st.session_state.get("quiz_current_q"):
-                            st.session_state.quiz_history.append({"q": q_data.get('question'), "user": user_ans, "correct": q_data.get('correct_answer'), "is_correct": is_correct})
-                            if len(st.session_state.quiz_history) % 5 == 0: run_quiz_weakpoint_check(st.session_state.quiz_history[-5:], user_email, q_params.get('subj', 'General'))
+                    if is_correct:
+                        st.success(f"**Correct!** {explanation}")
+                        if st.session_state.get("quiz_bg") != "correct":
+                            st.session_state.quiz_score += 1
+                            st.session_state.quiz_bg = "correct"; st.rerun()
+                    else:
+                        if q_data.get("type", "MCQ") == "MCQ": st.error(f"**Incorrect.** The correct answer was **{q_data.get('correct_answer')}**. \n\n*Explanation: {explanation}*")
+                        else: st.error(f"**Incorrect.** \n\n*Feedback: {explanation}*")
+                        if st.session_state.get("quiz_bg") != "wrong":
+                            st.session_state.quiz_bg = "wrong"; st.rerun()
+                            
+                    if len(st.session_state.get("quiz_history",[])) < st.session_state.get("quiz_current_q"):
+                        st.session_state.quiz_history.append({"q": q_data.get('question'), "user": user_ans, "correct": q_data.get('correct_answer'), "is_correct": is_correct})
+                        if len(st.session_state.quiz_history) % 5 == 0: run_quiz_weakpoint_check(st.session_state.quiz_history[-5:], user_email, q_params.get('subj', 'General'))
 
-                        is_last_q = (st.session_state.get("quiz_current_q") == len(q_list))
-                        if st.button("Next Question" if not is_last_q else "Finish Quiz", type="primary", use_container_width=True):
-                            if is_last_q: st.session_state.quiz_finished = True
-                            else: st.session_state.quiz_current_q += 1
-                            st.session_state.quiz_user_answer = None 
-                            st.session_state.quiz_bg = "default"; st.rerun()
+                    is_last_q = (st.session_state.get("quiz_current_q") == len(q_list))
+                    if st.button("Next Question" if not is_last_q else "Finish Quiz", type="primary", use_container_width=True):
+                        if is_last_q: st.session_state.quiz_finished = True
+                        else: st.session_state.quiz_current_q += 1
+                        st.session_state.quiz_user_answer = None 
+                        st.session_state.quiz_bg = "default"; st.rerun()
+
 # ==========================================
-# APP ROUTER
+# APP ROUTING & MAIN EXECUTION
 # ==========================================
 render_chat_interface = False 
 view_mode = st.session_state.get("view_mode", "main")
 app_mode = st.session_state.get("app_mode", "💬 AI Tutor")
 
+# --- 1) ACCOUNT DASHBOARD (ALL ROLES) ---
 if view_mode == "account":
-    st.markdown("<div class='big-title' style='display:flex;align-items:center;justify-content:center;gap:15px;'><svg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' class='feather feather-user'><path d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'></path><circle cx='12' cy='7' r='4'></circle></svg> My Account</div><br>", unsafe_allow_html=True)
+    render_chat_interface = False
+    st.markdown("<div class='big-title' style='display: flex; align-items: center; justify-content: center; gap: 15px;'><svg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' class='feather feather-user'><path d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'></path><circle cx='12' cy='7' r='4'></circle></svg> My Account</div><br>", unsafe_allow_html=True)
+    
     student_class_data = get_student_class_data(user_email)
     class_name = student_class_data.get('id') if student_class_data else "Not in a Class"
     school_name = user_profile.get('school') or (student_class_data.get('school') if student_class_data else None) or "Not linked"
-    
-    st.markdown(f"""<div class="glass-container">
-        <div class="account-detail"><b>Name:</b> {user_profile.get('display_name', 'Guest')}</div>
-        <div class="account-detail"><b>Email:</b> {user_email}</div>
-        <div class="account-detail"><b>Grade:</b> {user_profile.get('grade', 'Grade 6')}</div>
-        <div class="account-detail"><b>School:</b> {school_name}</div>
-        {f'<div class="account-detail"><b>Class:</b> {class_name}</div>' if user_role == 'student' else ''}
-    </div>""", unsafe_allow_html=True)
 
-    if not student_class_data and not user_profile.get('school'):
-        with st.form("rename_form", border=False):
-            st.markdown("<div class='glass-container'>", unsafe_allow_html=True)
-            new_name = st.text_input("Change Display Name", value=user_profile.get('display_name', ''))
-            if st.form_submit_button("Save Name", use_container_width=True):
-                if db: db.collection("users").document(user_email).update({"display_name": new_name})
-                st.success("Name updated!"); time.sleep(1); st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-    
-    if user_role == "teacher":
-        st.markdown("### Danger Zone")
-        with st.container(border=True):
-            if st.button("Request Account Deletion", type="primary", use_container_width=True):
-                confirm_delete_account_dialog()
+    with st.container():
+        st.markdown(f"""<div class="glass-container">
+            <div class="account-detail"><b>Name:</b> {user_profile.get('display_name', 'Guest')}</div>
+            <div class="account-detail"><b>Email:</b> {user_email}</div>
+            <div class="account-detail"><b>Grade:</b> {user_profile.get('grade', 'Grade 6')}</div>
+            <div class="account-detail"><b>School:</b> {school_name}</div>
+            {f'<div class="account-detail"><b>Class:</b> {class_name}</div>' if user_role == 'student' else ''}
+        </div>""", unsafe_allow_html=True)
+
+        if not student_class_data and not user_profile.get('school'):
+            with st.form("rename_form", border=False):
+                st.markdown("<div class='glass-container'>", unsafe_allow_html=True)
+                new_name = st.text_input("Change Display Name", value=user_profile.get('display_name', ''))
+                if st.form_submit_button("Save Name", use_container_width=True):
+                    if db: db.collection("users").document(user_email).update({"display_name": new_name})
+                    st.success("Name updated!"); time.sleep(1); st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+        
+        if user_role == "teacher":
+            st.markdown("### Danger Zone")
+            with st.container(border=True):
+                if st.button("Request Account Deletion", type="primary", use_container_width=True):
+                    confirm_delete_account_dialog()
 
     if user_role == "student":
         scores, totals = 0, 0
@@ -910,7 +932,8 @@ if view_mode == "account":
         
         st.markdown(f"""<div class="glass-container"><div class="mastery-title">Overall Mastery</div><div class="mastery-value">{mastery}%</div></div>""", unsafe_allow_html=True)
         st.markdown("### ⚠️ Potential Weak Spots (7 Days)")
-        with st.spinner("Analyzing..."): active_spots, _ = evaluate_weak_spots(user_email)
+        with st.spinner("Analyzing recent performance..."):
+            active_spots, _ = evaluate_weak_spots(user_email)
         
         if not active_spots: st.markdown("<div class='success-item'>No active weak spots detected! Great job! 🎉</div>", unsafe_allow_html=True)
         else:
@@ -922,13 +945,17 @@ if view_mode == "account":
                         if db: db.collection("users").document(user_email).collection("weak_spots").document(spot['id']).update({"dismissed": True})
                         st.rerun()
 
+# --- 2) TEACHER DASHBOARD ---
 elif user_role == "teacher":
-    st.markdown("<div class='big-title' style='color:#fc8404;'>👨‍🏫 helix.ai / Teacher</div><br>", unsafe_allow_html=True)
+    st.markdown("<div class='big-title' style='color:#fc8404;'>👨‍🏫 helix.ai / Teacher</div>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
     roster =[]
     if db:
         if user_profile.get("school"): roster_stream = db.collection("users").where(filter=firestore.FieldFilter("school", "==", user_profile.get("school"))).stream()
         else: roster_stream = db.collection("users").where(filter=firestore.FieldFilter("teacher_id", "==", user_email)).stream()
         roster =[u for u in roster_stream if u.to_dict().get("role") == "student"]
+
     teacher_menu = st.radio("Menu",["Student Analytics", "Class Management", "Assign Papers", "⚡ Interactive Quiz", "💬 AI Chat"], horizontal=True, label_visibility="collapsed")
     st.divider()
 
@@ -942,6 +969,7 @@ elif user_role == "teacher":
                 stu_email = student_doc_list[0].id
                 stu_class_data = get_student_class_data(stu_email)
                 class_subjects = stu_class_data.get("subjects",[]) if stu_class_data else[]
+                
                 st.markdown("#### Subject-Specific Mastery")
                 if not class_subjects: st.info("No subjects assigned to this student's class.")
                 else:
@@ -953,9 +981,13 @@ elif user_role == "teacher":
                             for qd in qr_docs: d = qd.to_dict(); scores += d.get("score", 0); totals += d.get("total", 0)
                         mastery = int((scores/totals)*100) if totals > 0 else 0
                         cols[i].metric(f"{subject}", f"{mastery}%")
+                
                 st.markdown("### ⚠️ Potential Weak Spots (7 Days)")
-                with st.spinner("Analyzing..."): active_spots, _ = evaluate_weak_spots(stu_email)
+                with st.spinner("Analyzing recent performance..."):
+                    active_spots, _ = evaluate_weak_spots(stu_email)
+                
                 relevant_spots =[s for s in active_spots if s.get('subject') in class_subjects] if class_subjects else active_spots
+                
                 if not relevant_spots: st.success("No active weak spots detected for your subjects!")
                 else:
                     for spot in relevant_spots:
@@ -968,20 +1000,27 @@ elif user_role == "teacher":
     elif teacher_menu == "Class Management":
         st.subheader("🏫 Class Management")
         with st.form("create_class_form", border=False):
-            st.markdown("<div class='glass-container'><h5>Create New Class</h5>", unsafe_allow_html=True)
-            cc1, cc2, cc3 = st.columns([0.4, 0.3, 0.3]); grade_choice = cc1.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"]); section_choice = cc2.selectbox("Section", ["A", "B", "C", "D"])
+            st.markdown("<div class='glass-container'>", unsafe_allow_html=True)
+            st.markdown("<h5>Create New Class</h5>", unsafe_allow_html=True)
+            cc1, cc2, cc3 = st.columns([0.4, 0.3, 0.3])
+            grade_choice = cc1.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"])
+            section_choice = cc2.selectbox("Section", ["A", "B", "C", "D"])
             if cc3.form_submit_button("Create", use_container_width=True):
                 success, msg = create_global_class(f"{grade_choice.split()[-1]}{section_choice}".upper(), user_email, grade_choice, section_choice, user_profile.get("school"))
                 if success: st.success(msg); time.sleep(1); st.rerun()
                 else: st.error(msg)
             st.markdown("</div>", unsafe_allow_html=True)
+            
         my_classes = list(db.collection("classes").where(filter=firestore.FieldFilter("created_by", "==", user_email)).stream()) if db else[]
         if my_classes:
-            st.markdown("---"); st.subheader("Edit Existing Class")
+            st.markdown("---")
+            st.subheader("Edit Existing Class")
             for c_doc in my_classes:
+                c_data = c_doc.to_dict()
                 col1, col2 = st.columns([0.85, 0.15])
                 if col1.button(f"🏫 {c_doc.id}", key=f"sel_cls_{c_doc.id}", use_container_width=True): st.session_state.managing_class = c_doc.id
                 if col2.button("⋮", key=f"del_cls_{c_doc.id}"): manage_class_dialog_ui(c_doc.id)
+                    
             if st.session_state.get("managing_class"):
                 m_class_id = st.session_state.get("managing_class")
                 if db:
@@ -991,18 +1030,25 @@ elif user_role == "teacher":
                         with st.form(f"edit_subjects_{m_class_id}", border=False):
                             st.markdown("<div class='glass-container'>", unsafe_allow_html=True)
                             subjects = st.multiselect(f"Subjects taught in {m_class_id}",["Math", "Science", "English", "Physics", "Chemistry", "Biology"], default=c_data.get("subjects",[]))
-                            if st.form_submit_button("Update Subjects", use_container_width=True): db.collection("classes").document(m_class_id).update({"subjects": subjects}); st.success("Updated!"); time.sleep(1); st.rerun()
+                            if st.form_submit_button("Update Subjects", use_container_width=True):
+                                db.collection("classes").document(m_class_id).update({"subjects": subjects})
+                                st.success("Subjects updated!"); time.sleep(1); st.rerun()
                             st.markdown("</div>", unsafe_allow_html=True)
+                        
                         st.markdown("<h6>Student Roster</h6>", unsafe_allow_html=True)
                         for s_email in c_data.get("students",[]):
-                            s_prof = get_user_profile(s_email); c1, c2 = st.columns([0.85, 0.15], vertical_alignment="center")
+                            s_prof = get_user_profile(s_email)
+                            c1, c2 = st.columns([0.85, 0.15], vertical_alignment="center")
                             c1.markdown(f"<div class='glass-container' style='padding:10px; margin-bottom:5px;'>{s_prof.get('display_name', 'Unknown')} ({s_email})</div>", unsafe_allow_html=True)
                             if c2.button("⋮", key=f"mng_stu_{s_email}"): manage_student_dialog_ui(s_email, m_class_id)
+                        
                         with st.form(f"add_student_{m_class_id}", border=False):
-                            st.markdown("<div class='glass-container'>", unsafe_allow_html=True); em = st.text_input("Add Student Email")
+                            st.markdown("<div class='glass-container'>", unsafe_allow_html=True)
+                            em = st.text_input("Add Student Email")
                             if st.form_submit_button("Add Student", use_container_width=True) and em:
                                 db.collection("users").document(em.strip().lower()).set({"role": "student", "teacher_id": user_email, "school": user_profile.get("school")}, merge=True)
-                                db.collection("classes").document(m_class_id).update({"students": firestore.ArrayUnion([em.strip().lower()])}); st.success("Added!"); time.sleep(1); st.rerun()
+                                db.collection("classes").document(m_class_id).update({"students": firestore.ArrayUnion([em.strip().lower()])})
+                                st.success("Added!"); time.sleep(1); st.rerun()
                             st.markdown("</div>", unsafe_allow_html=True)
 
     elif teacher_menu == "Assign Papers":
@@ -1010,15 +1056,17 @@ elif user_role == "teacher":
         with st.form("assign_paper_form", border=False):
             st.markdown("<div class='glass-container'>", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
-            assign_title, assign_subject, assign_grade = c1.text_input("Title", "Quiz"), c1.selectbox("Subject",["Math", "Science", "English"]), c1.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"])
-            assign_difficulty, assign_marks, assign_extra = c2.selectbox("Difficulty",["Easy", "Hard"]), c2.number_input("Marks", 10, 100, 30), st.text_area("Extra")
-            if st.form_submit_button("🤖 Generate", type="primary", use_container_width=True):
-                with st.spinner("Writing..."):
-                    books = select_relevant_books(f"{assign_subject} {assign_grade}", st.session_state.get("textbook_handles", {}), assign_grade); parts =[]
+            assign_title, assign_subject, assign_grade = c1.text_input("Title", "Chapter Quiz"), c1.selectbox("Subject",["Math", "Science", "Biology", "Chemistry", "Physics", "English"]), c1.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"])
+            assign_difficulty, assign_marks, assign_extra = c2.selectbox("Difficulty",["Easy", "Medium", "Hard"]), c2.number_input("Marks", 10, 100, 30, 5), st.text_area("Extra Instructions")
+            if st.form_submit_button("🤖 Generate with Helix AI", type="primary", use_container_width=True):
+                with st.spinner("Writing paper..."):
+                    books = select_relevant_books(f"{assign_subject} {assign_grade}", st.session_state.get("textbook_handles", {}), assign_grade)
+                    parts =[]
                     for b in books: parts.extend([types.Part.from_text(text=f"[Source: {b.display_name}]"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf")])
                     parts.append(types.Part.from_text(text=f"Task: Generate a CIE {assign_subject} paper for {assign_grade} students.\nDifficulty: {assign_difficulty}. Marks: {assign_marks}.\nExtra Instructions: {assign_extra}"))
                     try:
-                        resp = generate_with_retry("gemini-2.5-pro", parts, types.GenerateContentConfig(system_instruction=PAPER_SYSTEM, temperature=0.1)); gen_paper = safe_response_text(resp)
+                        resp = generate_with_retry("gemini-2.5-pro", parts, types.GenerateContentConfig(system_instruction=PAPER_SYSTEM, temperature=0.1))
+                        gen_paper = safe_response_text(resp)
                         draft_imgs, draft_mods = [],[]
                         if v_prompts := re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", gen_paper):
                             with concurrent.futures.ThreadPoolExecutor(5) as exe:
@@ -1027,91 +1075,141 @@ elif user_role == "teacher":
                         st.session_state.update({"draft_paper": gen_paper, "draft_images": draft_imgs, "draft_models": draft_mods, "draft_title": assign_title}); st.rerun()
                     except Exception as e: st.error(e)
             st.markdown("</div>", unsafe_allow_html=True)
+            
         if st.session_state.get("draft_paper"):
             with st.expander("Preview", expanded=True):
                 st.markdown(st.session_state.get("draft_paper").replace("[PDF_READY]", ""))
                 if st.session_state.get("draft_images"):
                     for i, m in zip(st.session_state.get("draft_images"), st.session_state.get("draft_models")):
                         if i: st.image(i, caption=m)
-                try: st.download_button("Download", data=create_pdf(st.session_state.get("draft_paper"), st.session_state.get("draft_images")), file_name=f"{st.session_state.get('draft_title')}.pdf", mime="application/pdf")
-                except Exception as e: st.error(f"Error: {e}")
+                try: st.download_button("Download PDF", data=create_pdf(st.session_state.get("draft_paper"), st.session_state.get("draft_images")), file_name=f"{st.session_state.get('draft_title')}.pdf", mime="application/pdf")
+                except Exception as e: st.error(f"PDF Gen Error: {e}")
 
     elif teacher_menu == "⚡ Interactive Quiz": render_quiz_engine()
     elif teacher_menu == "💬 AI Chat": render_chat_interface = True 
+
+# --- 3) STUDENT MAIN DASHBOARD (Chat or Quiz) ---
 else:
     if app_mode == "⚡ Interactive Quiz": render_quiz_engine()
     else: render_chat_interface = True
 
+# ==========================================
+# UNIVERSAL CHAT VIEW (AI Tutor / Teacher Chat)
+# ==========================================
 if render_chat_interface:
     st.markdown("<div class='big-title'>📚 helix.ai</div>", unsafe_allow_html=True)
     st.markdown("<div style='text-align: center; opacity: 0.60; font-size: 18px; margin-bottom: 30px;'>Your AI-powered Cambridge (CIE) Tutor for Grade 6-8.</div>", unsafe_allow_html=True)
-    for i, m in enumerate(st.session_state.get("messages",[])):
-        with st.chat_message(m["role"]):
-            d = m.get("content") or ""; d = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*", "", d)
-            d = re.sub(r"===ANALYTICS_START===.*?===ANALYTICS_END===", "", d, flags=re.IGNORECASE|re.DOTALL)
-            d = re.sub(r"```json\s*\{[^{]*?\"weak_point\".*?\}\s*```", "", d, flags=re.IGNORECASE|re.DOTALL)
-            st.markdown(re.sub(r"\[PDF_READY\]", "", re.sub(r"\{[^{]*?\"weak_point\".*?\}", "", d, flags=re.IGNORECASE|re.DOTALL), flags=re.IGNORECASE).strip())
-            for img, mod in zip(m.get("images") or[], m.get("image_models", [""]*10)):
+
+    for idx, msg in enumerate(st.session_state.get("messages",[])):
+        with st.chat_message(msg["role"]):
+            disp = msg.get("content") or ""
+            disp = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*", "", disp)
+            disp = re.sub(r"===ANALYTICS_START===.*?===ANALYTICS_END===", "", disp, flags=re.IGNORECASE|re.DOTALL)
+            disp = re.sub(r"```json\s*\{[^{]*?\"weak_point\".*?\}\s*```", "", disp, flags=re.IGNORECASE|re.DOTALL)
+            disp = re.sub(r"\{[^{]*?\"weak_point\".*?\}", "", disp, flags=re.IGNORECASE|re.DOTALL)
+            st.markdown(re.sub(r"\[PDF_READY\]", "", disp, flags=re.IGNORECASE).strip())
+            
+            for img, mod in zip(msg.get("images") or[], msg.get("image_models", ["Unknown"]*10)):
                 if img: st.image(img, use_container_width=True, caption=f"✨ Generated by helix.ai ({mod})")
-            for b6, mod in zip(m.get("db_images") or[], m.get("image_models", [""]*10)):
-                if b6:
-                    try: st.image(base64.b64decode(b6), use_container_width=True, caption=f"✨ Generated by helix.ai ({mod})")
+            for b64, mod in zip(msg.get("db_images") or[], msg.get("image_models", ["Unknown"]*10)):
+                if b64:
+                    try: st.image(base64.b64decode(b64), use_container_width=True, caption=f"✨ Generated by helix.ai ({mod})")
                     except: pass
-            if m.get("user_attachment_bytes"):
-                if "image" in (m.get("user_attachment_mime") or ""): st.image(m["user_attachment_bytes"], use_container_width=True)
-                else: st.caption(f"📎 {m.get('user_attachment_name', 'File')}")
-            elif m.get("user_attachment_b64"):
-                try: st.image(base64.b64decode(m["user_attachment_b64"]), use_container_width=True)
-                except: st.caption(f"📎 {m.get('user_attachment_name', 'File')}")
-            elif m.get("user_attachment_name"): st.caption(f"📎 {m.get('user_attachment_name', 'File')}")
-            if m["role"] == "assistant" and m.get("is_downloadable"):
-                try: st.download_button("📄 PDF", data=create_pdf(m.get("content") or "", m.get("images") or[base64.b64decode(b) for b in m.get("db_images", []) if b]), file_name=f"P_{i}.pdf", mime="application/pdf", key=f"dl_{i}")
-                except: pass
-    if ci := st.chat_input("Ask Helix...", accept_file=True, file_type=["jpg","png","pdf","txt"]):
-        if "textbook_handles" not in st.session_state: st.session_state.textbook_handles = upload_textbooks()
-        fb, fm, fn = (ci.files[0].getvalue() if ci.files else None), (ci.files[0].type if ci.files else None), (ci.files[0].name if ci.files else None)
+            
+            if msg.get("user_attachment_bytes"):
+                mime, name = msg.get("user_attachment_mime", ""), msg.get("user_attachment_name", "File")
+                if "image" in mime: st.image(msg["user_attachment_bytes"], use_container_width=True)
+                else: st.caption(f"📎 Attached: {name}")
+            elif msg.get("user_attachment_b64"):
+                try: st.image(base64.b64decode(msg["user_attachment_b64"]), use_container_width=True)
+                except: st.caption(f"📎 Attached: {msg.get('user_attachment_name', 'File')}")
+            elif msg.get("user_attachment_name"): st.caption(f"📎 Attached: {msg.get('user_attachment_name', 'File')}")
+
+            if msg["role"] == "assistant" and msg.get("is_downloadable"):
+                try: st.download_button("📄 Download PDF", data=create_pdf(msg.get("content") or "", msg.get("images") or[base64.b64decode(b) for b in msg.get("db_images", []) if b]), file_name=f"Paper_{idx}.pdf", mime="application/pdf", key=f"dl_{idx}")
+                except Exception as e: st.error(f"PDF Error: {e}")
+
+    if chat_input := st.chat_input("Ask Helix...", accept_file=True, file_type=["jpg","png","pdf","txt"]):
+        
+        # 🎯 FIX: Using the newly robust sync function
+        if "textbook_handles" not in st.session_state: st.session_state.textbook_handles = sync_textbooks()
+        
+        f_bytes, f_mime, f_name = (chat_input.files[0].getvalue() if chat_input.files else None), (chat_input.files[0].type if chat_input.files else None), (chat_input.files[0].name if chat_input.files else None)
+        
         if "messages" not in st.session_state: st.session_state.messages =[]
-        st.session_state.messages.append({"role": "user", "content": (ci.text or "").strip(), "user_attachment_bytes": fb, "user_attachment_mime": fm, "user_attachment_name": fn})
+        st.session_state.messages.append({"role": "user", "content": (chat_input.text or "").strip(), "user_attachment_bytes": f_bytes, "user_attachment_mime": f_mime, "user_attachment_name": f_name})
         save_chat_history(); st.rerun()
-    if st.session_state.get("messages") and st.session_state.get("messages")[-1]["role"] == "user":
-        md = st.session_state.get("messages")[-1]
+
+    if st.session_state.get("messages") and st.session_state.messages[-1]["role"] == "user":
+        msg_data = st.session_state.messages[-1]
         with st.chat_message("assistant"):
-            th = st.empty(); th.markdown("""<div class="thinking-container"><span class="thinking-text">Thinking</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
+            think = st.empty(); think.markdown("""<div class="thinking-container"><span class="thinking-text">Thinking</span><div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div></div>""", unsafe_allow_html=True)
+            
             try:
-                vh, er =[], "model"
+                valid_history =[]
+                exp_role = "model"
                 for m in reversed([m for m in st.session_state.get("messages",[])[:-1] if not m.get("is_greeting")]):
-                    r, tx = "user" if m.get("role") == "user" else "model", m.get("content") or ""
-                    if tx.strip() and r == er: vh.insert(0, types.Content(role=r, parts=[types.Part.from_text(text=tx)])); er = "user" if er == "model" else "model"
-                if vh and vh[0].role == "model": vh.pop(0)
-                cp, sg =[], st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
-                bs = select_relevant_books(" ".join([m.get("content", "") for m in st.session_state.get("messages", [])[-3:]]), st.session_state.get("textbook_handles", {}), sg)
-                for b in bs: cp.extend([types.Part.from_text(text=f"--- SOURCE: {b.display_name} ---"), types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf"), types.Part.from_text(text="--- END ---")])
-                if fb := md.get("user_attachment_bytes"):
-                    mi = md.get("user_attachment_mime") or guess_mime(md.get("user_attachment_name"))
-                    if is_image_mime(mi): cp.append(types.Part.from_bytes(data=fb, mime_type=mi))
-                    elif "pdf" in mi:
-                        tm = f"temp_{time.time()}.pdf"; open(tm, "wb").write(fb); up = client.files.upload_file(tm)
+                    r = "user" if m.get("role") == "user" else "model"
+                    txt = m.get("content") or ""
+                    if txt.strip() and r == exp_role:
+                        valid_history.insert(0, types.Content(role=r, parts=[types.Part.from_text(text=txt)]))
+                        exp_role = "user" if exp_role == "model" else "model"
+                if valid_history and valid_history[0].role == "model": valid_history.pop(0)
+
+                curr_parts =[]
+                student_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
+                books = select_relevant_books(" ".join([m.get("content", "") for m in st.session_state.get("messages", [])[-3:]]), st.session_state.get("textbook_handles", {}), student_grade)
+                
+                if books:
+                    for b in books: 
+                        curr_parts.append(types.Part.from_text(text=f"--- START OF SOURCE TEXTBOOK: {b.display_name} ---"))
+                        curr_parts.append(types.Part.from_uri(file_uri=b.uri, mime_type="application/pdf"))
+                        curr_parts.append(types.Part.from_text(text=f"--- END OF SOURCE TEXTBOOK ---"))
+                
+                if f_bytes := msg_data.get("user_attachment_bytes"):
+                    mime = msg_data.get("user_attachment_mime") or guess_mime(msg_data.get("user_attachment_name"))
+                    if is_image_mime(mime): curr_parts.append(types.Part.from_bytes(data=f_bytes, mime_type=mime))
+                    elif "pdf" in mime:
+                        tmp = f"temp_{time.time()}.pdf"; open(tmp, "wb").write(f_bytes); up = client.files.upload_file(tmp)
                         while up.state.name == "PROCESSING": time.sleep(1); up = client.files.get(name=up.name)
-                        cp.append(types.Part.from_uri(file_uri=up.uri, mime_type="application/pdf")); os.remove(tm)
-                cp.append(types.Part.from_text(text=f"Context: {sg}.\n\nQuery: {md.get('content')}"))
-                if sum(1 for m in st.session_state.get("messages",[]) if m.get("role") == "user") % 6 == 0: cp.append(types.Part.from_text(text="Analyze prior inputs for a weak point. If detected, output hidden ===ANALYTICS_START=== JSON. If not, do NOT output."))
-                rp = generate_with_retry("gemini-2.5-pro", vh +[types.Content(role="user", parts=cp)], types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.3, tools=[{"google_search": {}}]))
-                bt = safe_response_text(rp) or "⚠️ *Fail.*"
-                mf = re.search(r"===ANALYTICS_START===(.*?)===ANALYTICS_END===", bt, flags=re.IGNORECASE|re.DOTALL) or re.search(r"(?:(?:Analytics.*?:?\s*|```json\s*)?(\{[\s\S]*?\"weak_point\"[\s\S]*?\})(?:\s*```)?", bt, flags=re.IGNORECASE)
-                if mf:
+                        curr_parts.append(types.Part.from_uri(file_uri=up.uri, mime_type="application/pdf")); os.remove(tmp)
+
+                curr_parts.append(types.Part.from_text(text=f"Context: Student Grade is {student_grade}.\n\nUser Query: {msg_data.get('content')}"))
+                
+                user_msg_count = sum(1 for m in st.session_state.get("messages",[]) if m["role"] == "user")
+                if user_msg_count > 0 and user_msg_count % 6 == 0:
+                    curr_parts.append(types.Part.from_text(text="Please analyze the student's previous inputs. If you detect a clear, specific academic weak point, output the hidden ===ANALYTICS_START=== JSON block. If not, do NOT output it."))
+
+                resp = generate_with_retry("gemini-2.5-pro", valid_history +[types.Content(role="user", parts=curr_parts)], types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.3, tools=[{"google_search": {}}]))
+                bot_txt = safe_response_text(resp) or "⚠️ *Failed to generate text.*"
+                
+                match_full = re.search(r"===ANALYTICS_START===(.*?)===ANALYTICS_END===", bot_txt, flags=re.IGNORECASE|re.DOTALL)
+                if not match_full: match_full = re.search(r"(?:(?:Here is the )?Analytics.*?:?\s*|```json\s*)?(\{[\s\S]*?\"weak_point\"[\s\S]*?\})(?:\s*```)?", bot_txt, flags=re.IGNORECASE)
+                
+                if match_full:
                     try:
-                        ad = json.loads(mf.group(1)); bt = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*$", "", bt[:mf.start()].strip()).strip()
+                        ad = json.loads(match_full.group(1))
+                        start_idx = match_full.start()
+                        bot_txt = bot_txt[:start_idx].strip()
+                        bot_txt = re.sub(r"(?i)(?:Here is the )?(?:Analytics|JSON).*?(?:for student)?s?\s*[:-]?\s*$", "", bot_txt).strip()
                         if is_authenticated and db and ad.get("weak_point"): db.collection("users").document(user_email).collection("analytics").add({"timestamp": time.time(), "source": "chat", **ad})
-                    except: pass
-                th.empty(); imgs, mods = [],[]
-                if vp := re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", bt):
+                    except Exception: pass
+
+                think.empty()
+                
+                imgs, mods = [],[]
+                if v_prompts := re.findall(r"(IMAGE_GEN|PIE_CHART):\s*\[(.*?)\]", bot_txt):
                     with concurrent.futures.ThreadPoolExecutor(5) as exe:
-                        for r in exe.map(process_visual_wrapper, vp):
+                        for r in exe.map(process_visual_wrapper, v_prompts):
                             if r and r[0]: imgs.append(r[0]); mods.append(r[1])
-                dl = bool(re.search(r"\[PDF_READY\]|##\s*Mark Scheme", bt, re.IGNORECASE))
-                st.session_state.messages.append({"role": "assistant", "content": bt, "is_downloadable": dl, "images": imgs, "image_models": mods})
-                if is_authenticated and sum(1 for m in st.session_state.get("messages", []) if m.get("role") == "user") == 1:
+                
+                dl = bool(re.search(r"\[PDF_READY\]", bot_txt, re.IGNORECASE) or (re.search(r"##\s*Mark Scheme", bot_txt, re.IGNORECASE) and re.search(r"\[\d+\]", bot_txt)))
+                st.session_state.messages.append({"role": "assistant", "content": bot_txt, "is_downloadable": dl, "images": imgs, "image_models": mods})
+                
+                if is_authenticated and sum(1 for m in st.session_state.get("messages",[]) if m["role"] == "user") == 1:
                     t = generate_chat_title(client, st.session_state.get("messages", []))
-                    if t and db: get_threads_collection().document(st.session_state.get("current_thread_id")).set({"title": t}, merge=True)
+                    if t: get_threads_collection().document(st.session_state.get("current_thread_id")).set({"title": t}, merge=True)
+                
                 save_chat_history(); st.rerun()
-            except Exception as e: th.empty(); st.error(f"Error: {e}")
+                
+            except Exception as e: think.empty(); st.error(f"Error: {e}")
