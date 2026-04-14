@@ -686,7 +686,7 @@ def render_quiz_engine():
                 with st.container(border=True):
                     st.markdown("<h3 style='text-align: center; margin-bottom:20px;'>Generate AI Quiz</h3>", unsafe_allow_html=True)
                     c1, c2, c3 = st.columns(3)
-                    q_subj = c1.selectbox("Subject",["Math", "Science", "English", "Physics", "Chemistry", "Biology"])
+                    q_subj = c1.selectbox("Subject",["Math", "Science", "English"])
                     current_active_grade = st.session_state.get("active_grade", user_profile.get("grade", "Grade 6"))
                     q_grade = c2.selectbox("Grade",["Grade 6", "Grade 7", "Grade 8"], index=["Grade 6", "Grade 7", "Grade 8"].index(current_active_grade))
                     q_diff = c3.selectbox("Difficulty",["Easy", "Medium", "Hard"])
