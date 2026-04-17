@@ -2,8 +2,71 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>MentorLoop Study Mode</title>
+<title>MentorLoop Smart Study</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  getDoc
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {
+  getAuth,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBOP356DMuNyWQyHDbksw0i_dWXfXsbQvI",
+  authDomain: "mentorloop-55a37.firebaseapp.com",
+  projectId: "mentorloop-55a37",
+  storageBucket: "mentorloop-55a37.firebasestorage.app",
+  messagingSenderId: "322053863438",
+  appId: "1:322053863438:web:c05dcb365853e04573a45f",
+  measurementId: "G-PFT8KKBG4Q"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+window.db = db;
+window.auth = auth;
+window.currentUser = null;
+
+onAuthStateChanged(auth, user=>{
+  if(user){
+    window.currentUser = user;
+    loadUserData();
+  }
+});
+
+window.saveStudyData = async function(data){
+  if(!window.currentUser) return;
+
+  await setDoc(
+    doc(db,"studyProgress",window.currentUser.uid),
+    data,
+    { merge:true }
+  );
+}
+
+window.loadUserData = async function(){
+  if(!window.currentUser) return;
+
+  const snap = await getDoc(doc(db,"studyProgress",window.currentUser.uid));
+  if(!snap.exists()) return;
+
+  const d = snap.data();
+
+  if(d.streak){
+    document.getElementById("streakBox").innerText =
+      "🔥 Study streak: " + d.streak + " days";
+  }
+}
+</script>
 
 <style>
 body{
@@ -14,16 +77,8 @@ background:linear-gradient(135deg,#0f172a,#020617);
 color:white;
 text-align:center;
 }
-
-.container{
-max-width:900px;
-margin:auto;
-}
-
-h1{
-color:#22d3ee;
-}
-
+.container{max-width:900px;margin:auto;}
+h1{color:#22d3ee;}
 select,button{
 padding:12px;
 margin:8px;
@@ -31,174 +86,156 @@ border:none;
 border-radius:10px;
 font-size:15px;
 }
-
 button{
 background:#22d3ee;
 font-weight:bold;
 cursor:pointer;
 }
-
-#status,#hintBox,#weakBox,#focusBox{
-margin-top:18px;
-font-size:18px;
+.info{
+margin-top:15px;
 font-weight:bold;
 }
-
-#hintBox{color:#facc15;}
-#weakBox{color:#f87171;}
-#focusBox{color:#fb7185;}
+#highlightText{
+margin-top:20px;
+padding:18px;
+background:#1e293b;
+border-radius:12px;
+cursor:pointer;
+}
+mark{
+background:yellow;
+color:black;
+}
 </style>
 </head>
 <body>
 
 <div class="container">
-<h1>📚 MentorLoop Study Mode</h1>
+<h1>📚 MentorLoop Smart Study</h1>
 
-<select id="gradeSelect" onchange="loadTopics()">
-<option value="">Select Grade</option>
-<option value="6">Grade 6</option>
-<option value="7">Grade 7</option>
-<option value="8">Grade 8</option>
-<option value="9">Grade 9</option>
+<select id="gradeSelect">
+<option>Grade 7</option>
+<option>Grade 8</option>
+<option>Grade 9</option>
 </select>
 
-<select id="topicSelect" onchange="loadBooks()">
-<option value="">Select Topic</option>
+<select id="topicSelect">
+<option>Math</option>
+<option>Science</option>
+<option>English</option>
 </select>
 
 <select id="bookSelect">
-<option value="">Select Book</option>
+<option>Book 1</option>
+<option>Book 2</option>
+<option>Workbook</option>
 </select>
 
 <br>
 
 <button onclick="openBook()">Open Book</button>
 <button onclick="showHint()">Hint</button>
-<button onclick="markWeak()">Weak Topic</button>
+<button onclick="bookmarkPage()">Bookmark</button>
+<button onclick="openAI()">Ask AI</button>
+<button onclick="readAloud()">🔊 Read</button>
 
-<div id="status"></div>
-<div id="hintBox"></div>
-<div id="weakBox"></div>
-<div id="focusBox"></div>
+<div id="status" class="info"></div>
+<div id="hintBox" class="info"></div>
+<div id="weakBox" class="info"></div>
+<div id="streakBox" class="info"></div>
+<div id="recommendBox" class="info"></div>
+
+<div id="highlightText" onclick="toggleHighlight(this)">
+Tap this text to highlight important content.
+</div>
 </div>
 
 <script>
-let activeGrade="";
-let activeTopic="";
-let activeBook="";
-let tabSwitches=0;
+let studyTime=0;
+let weakCount=0;
+let currentPage=1;
 
-const library={
-"7":{
-"Math":{
-"Student Book":"CIE_7_SB_Math.pdf",
-"Workbook":"CIE_7_WB_Math.pdf"
-},
-"Science":{
-"Book 1":"CIE_7_SB_1_Sci.pdf",
-"Book 2":"CIE_7_SB_2_Sci.pdf",
-"Workbook":"CIE_7_WB_Sci.pdf"
-},
-"English":{
-"Book 1":"CIE_7_SB_1_Eng.pdf",
-"Book 2":"CIE_7_SB_2_Eng.pdf"
-}
-},
-"8":{
-"Math":{
-"Student Book":"CIE_8_SB_Math.pdf",
-"Workbook":"CIE_8_WB.pdf"
-},
-"Science":{
-"Book 1":"CIE_8_SB_1_Sci.pdf",
-"Book 2":"CIE_8_SB_2_Sci.pdf"
-}
-},
-"9":{
-"Science":{
-"Book 1":"CIE_9_SB_1_Sci.pdf",
-"Book 2":"CIE_9_SB_2_Sci.pdf"
-},
-"Math":{
-"Student Book":"CIE_9_SB_Math.pdf"
-}
-}
-};
-
-const hints={
-"Math":"Solve one step at a time.",
-"Science":"Understand why the concept happens.",
-"English":"Use nearby sentences for clues.",
-"General":"Read examples carefully."
-};
-
-function loadTopics(){
-const grade=gradeSelect.value;
-topicSelect.innerHTML='<option value="">Select Topic</option>';
-bookSelect.innerHTML='<option value="">Select Book</option>';
-
-if(!library[grade]) return;
-
-Object.keys(library[grade]).forEach(topic=>{
-topicSelect.innerHTML+=`<option value="${topic}">${topic}</option>`;
-});
-}
-
-function loadBooks(){
-const grade=gradeSelect.value;
-const topic=topicSelect.value;
-
-bookSelect.innerHTML='<option value="">Select Book</option>';
-
-if(!library[grade] || !library[grade][topic]) return;
-
-Object.keys(library[grade][topic]).forEach(book=>{
-bookSelect.innerHTML+=`<option value="${book}">${book}</option>`;
-});
+function getStudyKey(){
+  return gradeSelect.value+"_"+topicSelect.value+"_"+bookSelect.value;
 }
 
 function openBook(){
-activeGrade=gradeSelect.value;
-activeTopic=topicSelect.value;
-activeBook=bookSelect.value;
+  const key=getStudyKey();
 
-if(!activeGrade || !activeTopic || !activeBook){
-alert("Select grade, topic and book");
-return;
-}
+  window.open("sample.pdf","_blank");
 
-const file=library[activeGrade][activeTopic][activeBook];
-
-window.open(encodeURI(file),"_blank");
-
-status.innerText=`📖 Opened ${activeTopic} - ${activeBook}`;
-hintBox.innerText="";
-weakBox.innerText="";
-
-document.documentElement.requestFullscreen?.();
+  status.innerText="📖 Book opened";
+  increaseStreak();
+  saveProgress();
+  recommendNext();
 }
 
 function showHint(){
-if(!activeTopic) return;
+  weakCount++;
+  hintBox.innerText="💡 Break difficult ideas into smaller steps.";
 
-hintBox.innerText="💡 "+(hints[activeTopic]||hints.General);
+  if(weakCount>=2){
+    weakBox.innerText="⚠ Weak topic detected: "+topicSelect.value;
+    saveProgress();
+  }
 }
 
-function markWeak(){
-if(!activeTopic || !activeBook) return;
+function bookmarkPage(){
+  status.innerText="🔖 Page bookmarked";
 
-weakBox.innerText=`⚠ Weak Topic Noted: ${activeTopic} (${activeBook})`;
+  saveStudyData({
+    bookmark:getStudyKey(),
+    page:currentPage
+  });
+}
+
+function toggleHighlight(el){
+  if(el.innerHTML.includes("<mark>")){
+    el.innerHTML="Tap this text to highlight important content.";
+  }else{
+    el.innerHTML="<mark>Tap this text to highlight important content.</mark>";
+  }
+}
+
+function recommendNext(){
+  recommendBox.innerText="➡ Recommended next: Workbook";
+}
+
+function increaseStreak(){
+  let streak=Number(localStorage.getItem("ml_streak")||0)+1;
+  localStorage.setItem("ml_streak",streak);
+
+  streakBox.innerText="🔥 Study streak: "+streak+" days";
+
+  saveStudyData({streak});
+}
+
+function readAloud(){
+  const msg=new SpeechSynthesisUtterance(
+    "Reading support activated for "+topicSelect.value
+  );
+  speechSynthesis.speak(msg);
+}
+
+function openAI(){
+  window.open("https://complex-buddy-ai.lovable.app","_blank");
+}
+
+async function saveProgress(){
+  await saveStudyData({
+    lastBook:getStudyKey(),
+    weakTopic: weakCount>=2 ? topicSelect.value : "",
+    updated: Date.now()
+  });
 }
 
 document.addEventListener("visibilitychange",()=>{
-if(document.hidden){
-tabSwitches++;
-focusBox.innerText=`⚠ Tab switched ${tabSwitches} time(s)`;
-
-if(tabSwitches>=3){
-focusBox.innerText="🔒 Too many distractions detected.";
-}
-}
+  if(document.hidden){
+    studyTime++;
+    if(studyTime>=3){
+      status.innerText="⚠ Too many tab switches";
+    }
+  }
 });
 </script>
 
