@@ -1,8 +1,0 @@
-streamlit
-google-genai
-google-cloud-firestore
-google-auth
-reportlab
-matplotlib
-Pillow
-Authlib
