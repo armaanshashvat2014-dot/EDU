@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>MentorLoop Study Mode</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body{
+margin:0;
+padding:20px;
+font-family:Segoe UI,sans-serif;
+background:linear-gradient(135deg,#0f172a,#020617);
+color:white;
+text-align:center;
+}
+
+.container{
+max-width:950px;
+margin:auto;
+}
+
+h1{
+color:#22d3ee;
+margin-bottom:25px;
+}
+
+select,button{
+padding:12px;
+margin:8px;
+border:none;
+border-radius:10px;
+font-size:15px;
+}
+
+button{
+background:#22d3ee;
+font-weight:bold;
+cursor:pointer;
+}
+
+#status,#hintBox,#weakBox{
+margin-top:16px;
+font-weight:bold;
+font-size:18px;
+}
+
+#hintBox{color:#facc15;}
+#weakBox{color:#f87171;}
+
+#quizBox{
+display:none;
+margin-top:25px;
+padding:25px;
+background:#1e293b;
+border-radius:18px;
+}
+
+.option{
+background:#334155;
+padding:12px;
+margin-top:10px;
+border-radius:10px;
+cursor:pointer;
+}
+
+.option:hover{
+background:#22d3ee;
+color:black;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h1>📚 MentorLoop Study Mode</h1>
+
+<select id="gradeSelect" onchange="loadTopics()">
+<option value="">Select Grade</option>
+<option value="6">Grade 6</option>
+<option value="7">Grade 7</option>
+<option value="8">Grade 8</option>
+<option value="9">Grade 9</option>
+</select>
+
+<select id="topicSelect" onchange="loadBooks()">
+<option value="">Select Topic</option>
+</select>
+
+<select id="bookSelect">
+<option value="">Select Book</option>
+</select>
+
+<br>
+
+<button onclick="openBook()">Open Book</button>
+<button onclick="showHint()">Hint</button>
+<button onclick="startQuiz()">Take Test</button>
+
+<div id="status"></div>
+<div id="hintBox"></div>
+<div id="weakBox"></div>
+
+<div id="quizBox"></div>
+</div>
+
+<script>
+let activeGrade="";
+let activeTopic="";
+let activeBook="";
+
+const library = {
+"6":{
+  "Hindi":{
+    "Book 1":"CIE:CBSE_6_SB_Hindi_1.pdf",
+    "Book 2":"CIE:CBSE_6_SB_Hindi_2.pdf",
+    "Book 3":"CIE:CBSE_6_SB_Hindi_3.pdf",
+    "Book 4":"CIE:CBSE_6_SB_Hindi_4.pdf",
+    "Book 5":"CIE:CBSE_6_SB_Hindi_5.pdf"
+  },
+  "French":{
+    "Book 1":"CIE:CBSE_6,7,8_SB_French_1.pdf",
+    "Book 2":"CIE:CBSE_6,7,8_SB_French_2.pdf"
+  },
+  "Computer Science":{
+    "Syllabus":"CIE:CBSE_6,7,8_SYLLABUS_CompSci.pdf"
+  }
+},
+"7":{
+  "Math":{
+    "Student Book":"CIE_7_SB_Math.pdf",
+    "Workbook":"CIE_7_WB_Math.pdf",
+    "Answers":"CIE_7_WB_ANSWERS_Math.pdf"
+  },
+  "English":{
+    "Book 1":"CIE_7_SB_1_Eng.pdf",
+    "Book 2":"CIE_7_SB_2_Eng.pdf",
+    "Workbook":"CIE_7_WB_Eng.pdf"
+  },
+  "Science":{
+    "Book 1":"CIE_7_SB_1_Sci.pdf",
+    "Book 2":"CIE_7_SB_2_Sci.pdf",
+    "Workbook":"CIE_7_WB_Sci.pdf"
+  },
+  "Hindi":{
+    "Student Book":"CIE_CBSE_7_SB_Hindi.pdf"
+  }
+},
+"8":{
+  "Math":{
+    "Student Book":"CIE_8_SB_Math.pdf",
+    "Workbook":"CIE_8_WB.pdf",
+    "Answers":"CIE_8_WB_ANSWERS_Math.pdf"
+  },
+  "English":{
+    "Book 1":"CIE_8_SB_1_Eng.pdf",
+    "Book 2":"CIE_8_SB_2_Eng.pdf"
+  },
+  "Science":{
+    "Book 1":"CIE_8_SB_1_Sci.pdf",
+    "Book 2":"CIE_8_SB_2_Sci.pdf",
+    "Workbook":"CIE_8_WB_Sci.pdf"
+  },
+  "Hindi":{
+    "Student Book":"CIE_CBSE_8_SB_Hindi.pdf"
+  }
+},
+"9":{
+  "Math":{
+    "Student Book":"CIE_9_SB_Math.pdf"
+  },
+  "Science":{
+    "Book 1":"CIE_9_SB_1_Sci.pdf",
+    "Book 2":"CIE_9_SB_2_Sci.pdf",
+    "Workbook":"CIE_9_WB_Sci.pdf"
+  },
+  "General":{
+    "Book 1":"CIE_9_SB_1.pdf",
+    "Book 2":"CIE_9_SB_2.pdf",
+    "Workbook":"CIE_9_WB.pdf"
+  }
+}
+};
+
+const hints = {
+"Math":"Break complex problems into smaller steps.",
+"English":"Look for context clues around difficult words.",
+"Science":"Focus on the concept before memorizing.",
+"Hindi":"Read aloud to understand sentence flow.",
+"French":"Try connecting the word with its meaning.",
+"Computer Science":"Understand logic before syntax.",
+"General":"Review examples before solving."
+};
+
+const quizzes = {
+"Math":{"q":"What is 30% of 50?","options":["10","15","20","25"],"answer":1},
+"English":{"q":"A synonym of happy?","options":["sad","joyful","weak","dark"],"answer":1},
+"Science":{"q":"Plants use?","options":["Digestion","Photosynthesis","Burning","Absorption"],"answer":1},
+"Hindi":{"q":"हिंदी is a?","options":["Language","Planet","Animal","Shape"],"answer":0},
+"French":{"q":"Bonjour means?","options":["Hello","Goodbye","Food","Water"],"answer":0},
+"Computer Science":{"q":"CPU stands for?","options":["Central Processing Unit","Control Unit","Computer Power Unit","Core Unit"],"answer":0},
+"General":{"q":"Water freezes at?","options":["0°C","50°C","100°C","-50°C"],"answer":0}
+};
+
+function loadTopics(){
+  const grade = gradeSelect.value;
+  topicSelect.innerHTML='<option value="">Select Topic</option>';
+  bookSelect.innerHTML='<option value="">Select Book</option>';
+
+  if(!library[grade]) return;
+
+  Object.keys(library[grade]).forEach(topic=>{
+    topicSelect.innerHTML += `<option value="${topic}">${topic}</option>`;
+  });
+}
+
+function loadBooks(){
+  const grade = gradeSelect.value;
+  const topic = topicSelect.value;
+
+  bookSelect.innerHTML='<option value="">Select Book</option>';
+
+  if(!library[grade] || !library[grade][topic]) return;
+
+  Object.keys(library[grade][topic]).forEach(book=>{
+    bookSelect.innerHTML += `<option value="${book}">${book}</option>`;
+  });
+}
+
+function openBook(){
+  activeGrade = gradeSelect.value;
+  activeTopic = topicSelect.value;
+  activeBook = bookSelect.value;
+
+  if(!activeGrade || !activeTopic || !activeBook){
+    alert("Select grade, topic and book");
+    return;
+  }
+
+  const file = library[activeGrade][activeTopic][activeBook];
+  window.open(encodeURI(file), "_blank");
+
+  status.innerText = "📖 Opened " + activeTopic + " - " + activeBook;
+  hintBox.innerText="";
+  weakBox.innerText="";
+}
+
+function showHint(){
+  if(!activeTopic) return;
+  hintBox.innerText = "💡 " + (hints[activeTopic] || "Review carefully.");
+}
+
+function startQuiz(){
+  const quiz = quizzes[activeTopic] || quizzes["General"];
+
+  quizBox.style.display="block";
+
+  quizBox.innerHTML=
+    `<h2>📝 Quick Test</h2>
+     <h3>${quiz.q}</h3>`+
+    quiz.options.map((o,i)=>
+      `<div class="option" onclick="checkAnswer(${i})">${o}</div>`
+    ).join("");
+}
+
+function checkAnswer(i){
+  const quiz = quizzes[activeTopic] || quizzes["General"];
+
+  if(i===quiz.answer){
+    status.innerText="✅ Good understanding";
+    weakBox.innerText="";
+  }else{
+    status.innerText="❌ Needs revision";
+    weakBox.innerText="⚠ Weak Topic: " + activeTopic;
+  }
+}
+</script>
+
+</body>
+</html>
