@@ -5,69 +5,6 @@
 <title>MentorLoop Smart Study</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {
-  getFirestore,
-  doc,
-  setDoc,
-  getDoc
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import {
-  getAuth,
-  onAuthStateChanged
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBOP356DMuNyWQyHDbksw0i_dWXfXsbQvI",
-  authDomain: "mentorloop-55a37.firebaseapp.com",
-  projectId: "mentorloop-55a37",
-  storageBucket: "mentorloop-55a37.firebasestorage.app",
-  messagingSenderId: "322053863438",
-  appId: "1:322053863438:web:c05dcb365853e04573a45f",
-  measurementId: "G-PFT8KKBG4Q"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-
-window.db = db;
-window.auth = auth;
-window.currentUser = null;
-
-onAuthStateChanged(auth, user=>{
-  if(user){
-    window.currentUser = user;
-    loadUserData();
-  }
-});
-
-window.saveStudyData = async function(data){
-  if(!window.currentUser) return;
-
-  await setDoc(
-    doc(db,"studyProgress",window.currentUser.uid),
-    data,
-    { merge:true }
-  );
-}
-
-window.loadUserData = async function(){
-  if(!window.currentUser) return;
-
-  const snap = await getDoc(doc(db,"studyProgress",window.currentUser.uid));
-  if(!snap.exists()) return;
-
-  const d = snap.data();
-
-  if(d.streak){
-    document.getElementById("streakBox").innerText =
-      "🔥 Study streak: " + d.streak + " days";
-  }
-}
-</script>
-
 <style>
 body{
 margin:0;
@@ -77,7 +14,7 @@ background:linear-gradient(135deg,#0f172a,#020617);
 color:white;
 text-align:center;
 }
-.container{max-width:900px;margin:auto;}
+.container{max-width:950px;margin:auto;}
 h1{color:#22d3ee;}
 select,button{
 padding:12px;
@@ -95,11 +32,11 @@ cursor:pointer;
 margin-top:15px;
 font-weight:bold;
 }
-#highlightText{
+#highlightBox{
 margin-top:20px;
 padding:18px;
 background:#1e293b;
-border-radius:12px;
+border-radius:14px;
 cursor:pointer;
 }
 mark{
@@ -113,22 +50,20 @@ color:black;
 <div class="container">
 <h1>📚 MentorLoop Smart Study</h1>
 
-<select id="gradeSelect">
-<option>Grade 7</option>
-<option>Grade 8</option>
-<option>Grade 9</option>
+<select id="gradeSelect" onchange="loadTopics()">
+<option value="">Select Grade</option>
+<option value="6">Grade 6</option>
+<option value="7">Grade 7</option>
+<option value="8">Grade 8</option>
+<option value="9">Grade 9</option>
 </select>
 
-<select id="topicSelect">
-<option>Math</option>
-<option>Science</option>
-<option>English</option>
+<select id="topicSelect" onchange="loadBooks()">
+<option value="">Select Topic</option>
 </select>
 
 <select id="bookSelect">
-<option>Book 1</option>
-<option>Book 2</option>
-<option>Workbook</option>
+<option value="">Select Book</option>
 </select>
 
 <br>
@@ -136,107 +71,198 @@ color:black;
 <button onclick="openBook()">Open Book</button>
 <button onclick="showHint()">Hint</button>
 <button onclick="bookmarkPage()">Bookmark</button>
-<button onclick="openAI()">Ask AI</button>
 <button onclick="readAloud()">🔊 Read</button>
+<button onclick="openAI()">Ask AI</button>
 
 <div id="status" class="info"></div>
 <div id="hintBox" class="info"></div>
 <div id="weakBox" class="info"></div>
 <div id="streakBox" class="info"></div>
-<div id="recommendBox" class="info"></div>
 
-<div id="highlightText" onclick="toggleHighlight(this)">
-Tap this text to highlight important content.
+<div id="highlightBox" onclick="toggleHighlight(this)">
+Tap here to highlight important text.
 </div>
 </div>
 
 <script>
-let studyTime=0;
 let weakCount=0;
 let currentPage=1;
 
-function getStudyKey(){
-  return gradeSelect.value+"_"+topicSelect.value+"_"+bookSelect.value;
+const library={
+"6":{
+  "French":{
+    "Book 1":"CIE:CBSE_6,7,8_SB_French_1.pdf",
+    "Book 2":"CIE:CBSE_6,7,8_SB_French_2.pdf"
+  },
+  "Computer Science":{
+    "Syllabus":"CIE:CBSE_6,7,8_SYLLABUS_CompSci.pdf"
+  },
+  "Hindi":{
+    "Book 1":"CIE:CBSE_6_SB_Hindi_1.pdf",
+    "Book 2":"CIE:CBSE_6_SB_Hindi_2.pdf",
+    "Book 3":"CIE:CBSE_6_SB_Hindi_3.pdf",
+    "Book 4":"CIE:CBSE_6_SB_Hindi_4.pdf",
+    "Book 5":"CIE:CBSE_6_SB_Hindi_5.pdf"
+  }
+},
+
+"7":{
+  "Math":{
+    "Student Book":"CIE_7_SB_Math.pdf",
+    "Workbook":"CIE_7_WB_Math.pdf",
+    "Answers":"CIE_7_WB_ANSWERS_Math.pdf"
+  },
+  "Science":{
+    "Book 1":"CIE_7_SB_1_Sci.pdf",
+    "Book 2":"CIE_7_SB_2_Sci.pdf",
+    "Workbook":"CIE_7_WB_Sci.pdf",
+    "Book 1":"CIE_7_SB_1.pdf",
+    "Book 2":"CIE_7_SB_2.pdf",
+    "Workbook":"CIE_7_WB.pdf"
+  },
+  "English":{
+    "Book 1":"CIE_7_SB_1_Eng.pdf",
+    "Book 2":"CIE_7_SB_2_Eng.pdf",
+    "Workbook":"CIE_7_WB_Eng.pdf"
+  },
+
+  },
+  "Hindi":{
+    "Student Book":"CIE_CBSE_7_SB_Hindi.pdf"
+  }
+},
+
+"8":{
+  "Math":{
+    "Student Book":"CIE_8_SB_Math.pdf",
+    "Workbook":"CIE_8_WB.pdf",
+    "Answers":"CIE_8_WB_ANSWERS_Math.pdf"
+  },
+  "Science":{
+    "Book 1":"CIE_8_SB_1_Sci.pdf",
+    "Book 2":"CIE_8_SB_2_Sci.pdf",
+    "Workbook":"CIE_8_WB_Sci.pdf",
+    "Book 1":"CIE_8_SB_1.pdf",
+    "Book 2":"CIE_8_SB_2.pdf"
+  },
+  "English":{
+    "Book 1":"CIE_8_SB_1_Eng.pdf",
+    "Book 2":"CIE_8_SB_2_Eng.pdf"
+  },
+  "Hindi":{
+    "Student Book":"CIE_CBSE_8_SB_Hindi.pdf"
+  }
+},
+
+"9":{
+  "Math":{
+    "Student Book":"CIE_9_SB_Math.pdf"
+  },
+  "Science":{
+    "Book 1":"CIE_9_SB_1_Sci.pdf",
+    "Book 2":"CIE_9_SB_2_Sci.pdf",
+    "Workbook":"CIE_9_WB_Sci.pdf", "Book 1":"CIE_9_SB_1.pdf",
+    "Book 2":"CIE_9_SB_2.pdf",
+    "Workbook":"CIE_9_WB.pdf"
+  },
+}
+};
+
+const hints={
+"Math":"Break the problem into smaller steps.",
+"Science":"Understand why the process happens.",
+"English":"Use surrounding sentences as clues.",
+"French":"Practice pronunciation aloud.",
+"Hindi":"Read the passage slowly first.",
+"Computer Science":"Understand the logic before memorizing.",
+"General":"Review examples carefully."
+};
+
+function loadTopics(){
+topicSelect.innerHTML='<option value="">Select Topic</option>';
+bookSelect.innerHTML='<option value="">Select Book</option>';
+
+const grade=gradeSelect.value;
+if(!library[grade]) return;
+
+Object.keys(library[grade]).forEach(topic=>{
+topicSelect.innerHTML += `<option value="${topic}">${topic}</option>`;
+});
+}
+
+function loadBooks(){
+bookSelect.innerHTML='<option value="">Select Book</option>';
+
+const grade=gradeSelect.value;
+const topic=topicSelect.value;
+
+if(!library[grade] || !library[grade][topic]) return;
+
+Object.keys(library[grade][topic]).forEach(book=>{
+bookSelect.innerHTML += `<option value="${book}">${book}</option>`;
+});
+}
+
+function getSelectedFile(){
+const grade=gradeSelect.value;
+const topic=topicSelect.value;
+const book=bookSelect.value;
+
+return library?.[grade]?.[topic]?.[book] || null;
 }
 
 function openBook(){
-  const key=getStudyKey();
+const file=getSelectedFile();
 
-  window.open("sample.pdf","_blank");
+if(!file){
+alert("Select grade, topic and book");
+return;
+}
 
-  status.innerText="📖 Book opened";
-  increaseStreak();
-  saveProgress();
-  recommendNext();
+window.open(encodeURI(file),"_blank");
+
+status.innerText="📖 Opened: "+file;
+increaseStreak();
 }
 
 function showHint(){
-  weakCount++;
-  hintBox.innerText="💡 Break difficult ideas into smaller steps.";
+weakCount++;
+const topic=topicSelect.value;
+hintBox.innerText="💡 "+(hints[topic]||hints.General);
 
-  if(weakCount>=2){
-    weakBox.innerText="⚠ Weak topic detected: "+topicSelect.value;
-    saveProgress();
-  }
+if(weakCount>=2){
+weakBox.innerText="⚠ Weak topic detected: "+topic;
+}
 }
 
 function bookmarkPage(){
-  status.innerText="🔖 Page bookmarked";
-
-  saveStudyData({
-    bookmark:getStudyKey(),
-    page:currentPage
-  });
-}
-
-function toggleHighlight(el){
-  if(el.innerHTML.includes("<mark>")){
-    el.innerHTML="Tap this text to highlight important content.";
-  }else{
-    el.innerHTML="<mark>Tap this text to highlight important content.</mark>";
-  }
-}
-
-function recommendNext(){
-  recommendBox.innerText="➡ Recommended next: Workbook";
+status.innerText="🔖 Bookmark saved for this book";
 }
 
 function increaseStreak(){
-  let streak=Number(localStorage.getItem("ml_streak")||0)+1;
-  localStorage.setItem("ml_streak",streak);
+let streak=Number(localStorage.getItem("ml_streak")||0)+1;
+localStorage.setItem("ml_streak",streak);
+streakBox.innerText="🔥 Study streak: "+streak+" days";
+}
 
-  streakBox.innerText="🔥 Study streak: "+streak+" days";
-
-  saveStudyData({streak});
+function toggleHighlight(el){
+if(el.innerHTML.includes("<mark>")){
+el.innerHTML="Tap here to highlight important text.";
+}else{
+el.innerHTML="<mark>Tap here to highlight important text.</mark>";
+}
 }
 
 function readAloud(){
-  const msg=new SpeechSynthesisUtterance(
-    "Reading support activated for "+topicSelect.value
-  );
-  speechSynthesis.speak(msg);
+const msg=new SpeechSynthesisUtterance(
+"Reading support for " + topicSelect.value
+);
+speechSynthesis.speak(msg);
 }
 
 function openAI(){
-  window.open("https://complex-buddy-ai.lovable.app","_blank");
+window.open("https://complex-buddy-ai.lovable.app","_blank");
 }
-
-async function saveProgress(){
-  await saveStudyData({
-    lastBook:getStudyKey(),
-    weakTopic: weakCount>=2 ? topicSelect.value : "",
-    updated: Date.now()
-  });
-}
-
-document.addEventListener("visibilitychange",()=>{
-  if(document.hidden){
-    studyTime++;
-    if(studyTime>=3){
-      status.innerText="⚠ Too many tab switches";
-    }
-  }
-});
 </script>
 
 </body>
